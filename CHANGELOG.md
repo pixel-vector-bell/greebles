@@ -1,5 +1,10 @@
 # Greebles — What's New
 
+## 0.11.0 — Every Greeble looks like a Greeble
+- 🎨 61 of the 72 Greebles have been redrawn. Before, many looked like little dragons or bats, with wings, bat ears or lizard tails. Now every one is clearly the same goblin species: pointed goblin ears, a flat face and a big grin.
+- 🧢 Each family has its own outfit or prop, so they're easier to tell apart: miner lamps, raincoats, pirate hats, boxing gloves, headphones, crowns and more.
+- 🚫 No more look-alikes of other games' creatures. The fire, electric and crystal families all got new designs.
+
 ## 0.10.0 — Desktop view, Start over & new backgrounds
 - 🖥️ Desktop view: on a PC or a wide tablet, the Wilds stay on the left all the time while you use the other tabs on the right. Tabs move to the top, text is bigger, and the catch screen opens as a centered panel. Phones look the same as before.
 - 🔄 Start over: Settings → "Start over (erase progress)". It shows exactly what you'd lose, then needs a second tap after a 2-second wait, so you can't do it by accident. It wipes the save on every device, and the walkthrough starts again.
