@@ -4,13 +4,13 @@ import {
   craterAt, hash32, hasMorph, isNight, morph, robot, stormAt, xpNeed,
   REGIONS, BOSS_REMATCH_MS, TEAM_MAX, UPGRADES, PRESS_MS_PER_SNARE, region, regionIndex, robotIn,
   JOB, FAVOR_MULT, LURES, LURE_MS, LURE_SPAWN_MIN, LURE_SPAWN_MAX, type LureId,
-  SHIP_PARTS, PERKS, perkCost, SIGNAL_STEP, EXPEDITION_MS, DAY_MS, WEEK_MS, SWARM_MULT, type PartId, type PerkId,
+  HUNTS, HUNT_SPAWN_MS, type Hunt, SHIP_PARTS, PERKS, perkCost, SIGNAL_STEP, EXPEDITION_MS, DAY_MS, WEEK_MS, SWARM_MULT, type PartId, type PerkId,
   RECIPES, MOVE_AUTO, MOVE_AUTO_MULT, MOVE_CHARGE, MOVE_TAP_MULT, elementOf, typeMult, type Element,
   type Evo, type ItemId, type Morph, type Rarity, type RegionId, type Role, type SnareId, type UpgradeId,
 } from './content';
 import { nextRandom } from './rng';
 
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 
 export interface Greeble { u: string; sp: string; lv: number; xp: number; stars: number; prism: boolean; caughtAt?: number }
 export type SpawnSrc = 'wild' | 'crater' | 'beacon' | 'wreck' | 'mythic' | 'legend' | 'lure';
@@ -68,6 +68,10 @@ export interface GameState {
   expoDay: number;
   /** Week number the swarm reward was claimed. */
   bestEver: { caught: number; bosses: number };
+  /** 0.8: lifetime counters for Mythic Hunts (survive a signal home). */
+  tally: Record<string, number>;
+  /** 0.8: hunts finished (time the Mythic was first called) and Mythics caught from them. */
+  hunts: Record<string, number>;
   /** Materials brought back by campers (for the welcome-back card / stats). */
   gathered: Partial<Record<ItemId, number>>;
   /** Kinds met in the wilds (or owned). */
@@ -91,7 +95,7 @@ export function newGame(seed = (Math.random() * 2 ** 31) | 0, now = Date.now()):
     spawns: [], wildClock: now, nextAmbientAt: now + RULES.ambientMinMs, nextCraterAt: 0, nextBeaconAt: 0, beaconUntil: 0,
     wreck: null, nextWreckAt: now + RULES.wreckFirstMs, enc: null,
     region: 'ash', unlocked: 1, bossBeaten: {}, upgrades: {}, pressCarry: 0, lure: null, gathered: {},
-    ship: {}, signals: 0, sp: 0, perks: {}, expo: null, expoDay: 0, bestEver: { caught: 0, bosses: 0 },
+    ship: {}, signals: 0, sp: 0, perks: {}, expo: null, expoDay: 0, bestEver: { caught: 0, bosses: 0 }, tally: {}, hunts: {},
     seen: {}, caught: {}, prismCaught: {}, claimed: {}, stats: freshStats(), lastSeen: now, tips: {},
   };
   // A few Greebles are already out there on day one.
@@ -124,7 +128,9 @@ export type GameEvent =
   | { t: 'expoBack'; sp: string; found: Partial<Record<ItemId, number>>; greeble?: string; prism: boolean }
   | { t: 'wreck'; robot: string }
   | { t: 'reward'; id: string; label: string }
-  | { t: 'beacon' };
+  | { t: 'beacon' }
+  | { t: 'huntDone'; id: string; mythic: string }
+  | { t: 'huntCall'; id: string; mythic: string };
 
 export type ActionResult = { ok: true } | { ok: false; why: string };
 const fail = (why: string): ActionResult => ({ ok: false, why });
@@ -143,6 +149,39 @@ export class World {
   private rand() { return nextRandom(this.s); }
   private between(a: number, b: number) { return a + this.rand() * (b - a); }
   private uid(prefix: string) { return `${prefix}${this.s.nextId++}`; }
+
+  // ── 0.8: Mythic Hunts ─────────────────────────────────────
+  tick(key: string, n = 1) { this.s.tally[key] = (this.s.tally[key] ?? 0) + n; }
+  tallyOf(key: string) { return this.s.tally[key] ?? 0; }
+  huntDone(h: Hunt) { return h.steps.every(st => this.tallyOf(st.key) >= st.need); }
+  /** Where a hunt is at: 'locked' (area not open), 'open' (working on it), 'ready' (done, Mythic can be called), 'out' (Mythic is waiting), 'caught'. */
+  huntState(h: Hunt, now: number): 'locked' | 'open' | 'ready' | 'out' | 'caught' {
+    if (this.s.caught[h.mythic] && this.s.hunts[h.id]) return 'caught';
+    if (!this.isOpen(h.reg)) return 'locked';
+    if (!this.huntDone(h)) return 'open';
+    return this.s.spawns.some(x => x.sp === h.mythic && x.src === 'mythic' && x.until > now) ? 'out' : 'ready';
+  }
+  private checkHunts(now: number) {
+    for (const h of HUNTS) if (!this.s.hunts[h.id] && this.isOpen(h.reg) && this.huntDone(h)) {
+      this.s.hunts[h.id] = now;
+      this.give('star', 1);
+      this.emit({ t: 'huntDone', id: h.id, mythic: h.mythic });
+    }
+  }
+  /** Call a finished hunt's Mythic into its area (free; you can call it again if it wanders off). */
+  callMythic(id: string, now: number): ActionResult {
+    const h = HUNTS.find(x => x.id === id); if (!h) return fail('No such hunt.');
+    const st = this.huntState(h, now);
+    if (st === 'locked' || st === 'open') return fail('Finish the hunt first.');
+    if (st === 'out') return fail('It is already out there. Go find it!');
+    if (h.night && !isNight(now)) return fail('It only comes out at night.');
+    if (!this.s.hunts[h.id]) this.s.hunts[h.id] = now;
+    const reg0 = this.s.region; this.s.region = h.reg;
+    this.addSpawn(now, 'mythic', h.mythic, HUNT_SPAWN_MS);
+    this.s.region = reg0;
+    this.emit({ t: 'huntCall', id: h.id, mythic: h.mythic });
+    return OK;
+  }
 
   // ── lookups ───────────────────────────────────────────────
   get(u: string) { return this.s.bag.find(g => g.u === u); }
@@ -385,7 +424,7 @@ export class World {
       stats: { ...old.stats }, tips: old.tips,
       signals: old.signals + 1, sp: old.sp + this.signalReward, perks: old.perks,
       bestEver: { caught: Math.max(old.bestEver.caught, old.stats.caught), bosses: Math.max(old.bestEver.bosses, old.stats.bosses) },
-      expoDay: old.expoDay,
+      expoDay: old.expoDay, tally: old.tally, hunts: old.hunts,
     };
     s.items = { ...s.items, good: (s.items.good ?? 0) + pack * 5, great: (s.items.great ?? 0) + pack * 2 };
     // the Field Guide rewards you already claimed stay claimed, but the bag/camp they gave come back too
@@ -415,6 +454,7 @@ export class World {
     if (this.busy(u)) return fail('It is busy.');
     this.s.expo = { u, until: now + EXPEDITION_MS, reg: this.s.region };
     this.s.expoDay = Math.floor(now / DAY_MS);
+    this.tick('expo'); this.checkHunts(now);
     return OK;
   }
   private expoReturn(t: number) {
@@ -479,14 +519,17 @@ export class World {
       const first = !s.caught[x.sp];
       s.bag.push({ u: this.uid('g'), sp: x.sp, lv: x.lv, xp: 0, stars: x.stars, prism: x.prism, caughtAt: Date.now() });
       s.caught[x.sp] = true; s.seen[x.sp] = true;
-      if (x.prism) { s.prismCaught[x.sp] = true; s.stats.prisms++; }
+      if (x.prism) { s.prismCaught[x.sp] = true; s.stats.prisms++; this.tick('prism'); }
       s.stats.caught++;
+      this.tick('catch'); this.tick(`catch:${elementOf(x.sp)}`); if (isNight(Date.now())) this.tick('night');
+      if (q === 3) this.tick('perfect');
       const scrap = (3 + RARITIES.indexOf(m.rarity) * 6) * (first ? 3 : 1) + q * 2;
       this.earn(scrap);
       s.spawns = s.spawns.filter(y => y.id !== x.id);
       s.enc = null;
       this.emit({ t: 'caught', sp: x.sp, first, prism: x.prism, stars: x.stars, scrap, quality: q });
       this.checkRewards();
+      this.checkHunts(Date.now());
       return OK;
     }
     if (this.rand() < FLEE[m.rarity] + Math.max(0, e.throws - 3) * 0.05) {
@@ -560,7 +603,7 @@ export class World {
     g.sp = to;
     this.s.seen[to] = true; this.s.caught[to] = true;
     if (g.prism) this.s.prismCaught[to] = true;
-    this.s.stats.evolved++;
+    this.s.stats.evolved++; this.tick('evolve'); this.checkHunts(now);
     this.emit({ t: 'evolved', u, from, to });
     this.checkRewards();
     return OK;
@@ -695,7 +738,7 @@ export class World {
         const scrap = Math.round(foe.scrap * (first ? 1 : 0.5));
         this.earn(scrap);
         this.s.bossBeaten[f.reg] = now;
-        this.s.stats.bosses++;
+        this.s.stats.bosses++; this.tick(`boss:${f.reg}`); this.checkHunts(now);
         add('great', first ? 5 : 2); add('beacon', 1);
         if (first) { add('star', 1); add(EVO_ITEMS[Math.floor(this.rand() * EVO_ITEMS.length)], 1); }
         for (const [k, v] of Object.entries(loot) as [ItemId, number][]) this.give(k, v);
@@ -714,6 +757,7 @@ export class World {
       if (this.rand() < 0.03 + foe.tier * 0.04 + (f.kind === 'wreck' ? 0.1 : 0)) add(EVO_ITEMS[Math.floor(this.rand() * EVO_ITEMS.length)], 1);
       if (f.kind === 'wreck' && this.rand() < 0.5) add('great', 1);
       for (const [k, v] of Object.entries(loot) as [ItemId, number][]) this.give(k, v);
+      this.tick(f.kind === 'wreck' ? 'wreck' : 'patrol'); this.checkHunts(now);
       if (f.kind === 'wreck') {
         this.s.stats.wrecks++;
         this.s.wreck = null;
@@ -741,6 +785,7 @@ export class World {
     for (const [k, v] of cost) this.s.items[k] = this.count(k) - v;
     this.give(r.out, r.n);
     this.emit({ t: 'crafted', out: r.out, n: r.n });
+    this.tick('craft'); this.checkHunts(Date.now());
     return OK;
   }
 
@@ -884,6 +929,8 @@ export function migrate(raw: any, now = Date.now()): GameState {
     expo: raw.expo && ids.has(raw.expo.u) && regIds.includes(raw.expo.reg) ? { u: raw.expo.u, until: num(raw.expo.until, 0), reg: raw.expo.reg } : null,
     expoDay: Math.max(0, num(raw.expoDay, 0) | 0),
     bestEver: { caught: Math.max(0, num(raw.bestEver?.caught, 0)), bosses: Math.max(0, num(raw.bestEver?.bosses, 0)) },
+    tally: Object.fromEntries(Object.entries(raw.tally ?? {}).filter(([k, v]) => typeof k === 'string' && typeof v === 'number' && isFinite(v) && v >= 0).slice(0, 200)) as Record<string, number>,
+    hunts: Object.fromEntries(Object.entries(raw.hunts ?? {}).filter(([k, v]) => HUNTS.some(h => h.id === k) && typeof v === 'number' && v > 0)) as Record<string, number>,
     gathered: Object.fromEntries(Object.entries(raw.gathered ?? {}).filter(([k, v]) => k in ITEMS && typeof v === 'number' && v >= 0)) as Partial<Record<ItemId, number>>,
     version: SAVE_VERSION,
     rng: num(raw.rng, fresh.rng) | 0,

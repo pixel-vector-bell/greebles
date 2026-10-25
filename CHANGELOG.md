@@ -1,5 +1,12 @@
 # Greebles — What's New
 
+## 0.8.0 — Mythic Hunts, the Void Rift & sound
+- 🌠 Mythic Hunts! There are now 5 Mythic Greebles, and each has its own hunt with 3 goals (like "Catch 25 Tide Greebles" or "Break 40 patrol robots"). Finish a hunt to get a Star Snare and call its Mythic into its area. If it gets away, you can call it again. Hunts are at the top of the Guide tab, and progress counts across all your trips home.
+- 🕳️ A 5th area: the Void Rift. Beat the Prism Sentinel to open it. It has 7 new Greebles (the Rift, Glimmer and Echo families), a new Legendary (the Rift Sovereign) and a new boss, the Null Engine.
+- 🔊 Sound effects: throws, wobbles, catches, Prismatic and Mythic sparkles, robot fights, evolving, boss wins and more. You can turn them off in Settings.
+- 🤖 The patrol robots (drone, pylon and colossus) and the new boss have real art now.
+- The Field Guide has 73 kinds and a new reward at 65 caught.
+
 ## 0.7.0 — Real Greeble art
 - Every Greeble now has its own picture! All 60 kinds got cut-out sticker art that sits nicely on the dark screens, plus the 4 robot bosses.
 - ✨ Prismatic Greebles look special now: a rainbow ring, colors that shift, and a sparkle that sweeps across them.

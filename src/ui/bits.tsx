@@ -24,6 +24,16 @@ export function BossArt({ reg, size = 44 }: { reg: string; size?: number }) {
   );
 }
 
+/** Patrol robots (art/robot_<id>.webp), emoji fallback. */
+export function RobotArt({ id, size = 44 }: { id: string; size?: number }) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <div className="gr-badge robot art" style={{ width: size, height: size }}>
+      {broken ? '🤖' : <img src={artUrl(`robot_${id}`)} alt="" draggable={false} onError={() => setBroken(true)} />}
+    </div>
+  );
+}
+
 /** Quality stars. `hidden` = not caught yet, so you don't know them. */
 export function Stars({ n, hidden = false }: { n: number; hidden?: boolean }) {
   if (hidden) return <span className="gr-stars hidden">? ? ? ? ?</span>;

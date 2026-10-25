@@ -47,12 +47,28 @@ D = {
  'lumen': 'glowing pale-yellow light Greeble with a lantern tail', 'lumenar': 'radiant golden glowing Greeble with sun rays',
  'aurelith': 'legendary Greeble wearing an ice-blue crystal crown and crystal armor, majestic, alone',
  'starborn': 'mythic cosmic pink-and-white Greeble made of stars and nebula, glowing, magical',
+ 'riftling': 'small plum-purple Greeble with a little violet spiral mark on its belly, on a white background',
+ 'riftor': 'purple Greeble with a violet spiral mark on its forehead and darker purple stripes, whole body standing on a white background',
+ 'riftmaw': 'big chunky friendly indigo-purple Greeble with a happy grin, wearing a silver chest plate, flexing its strong arms, whole body standing on a white background',
+ 'glimmet': 'lavender Greeble with a small yellow star on its forehead, waving one hand, nothing in its hands, whole body standing on a white background',
+ 'glimmeron': 'periwinkle-blue Greeble wearing a short yellow cape, a little star on the tip of its tail, whole body standing on a white background',
+ 'echolet': 'teal Greeble with huge pointed ears decorated with light-teal ring stripes, whole body standing on a white background',
+ 'echoran': 'dark-teal Greeble wearing a crystal visor, ripple rings glowing on its ears and chest',
+ 'riftking': 'legendary lilac Greeble wearing a purple crystal crown and a short royal purple cape, majestic, alone, whole body standing on a white background',
+ 'tidecrown': 'mythic turquoise Greeble wearing a big golden crown decorated with pink coral and pearls, holding a golden trident, sparkles, whole body standing on a white background',
+ 'gearheart': 'mythic amber-orange Greeble with small round ears, wearing brass goggles on its head and a brass backpack with a golden gear, holding a wrench, golden sparkles, whole body standing on a white background',
+ 'verdance': 'mythic bright-green Greeble with pink and yellow flowers blooming on its head and shoulders, a leafy tail, golden sparkles around it, whole body standing on a white background',
+ 'riftborn': 'mythic magenta-and-violet Greeble with white star-shaped spots all over its skin, a small golden crown of stars, sharp clean outline, whole body standing on a white background',
 }
 BOSSES = {
  'boss_ash': 'a big menacing rusty robot warden guardian, rust-orange metal, one glowing eye, cartoon',
  'boss_tide': 'a huge underwater dredger robot with scoop claws, blue metal, cartoon',
  'boss_rust': 'a giant scrap-metal colossus robot made of junk, storm-yellow lights, cartoon',
  'boss_glass': 'a tall crystal sentinel robot made of glowing glass prisms, cartoon',
+ 'boss_void': 'a huge purple-and-silver engine robot with a glowing violet orb in its chest, spiky antenna, big metal fists, cartoon, on a white background',
+ 'robot_drone': 'a small round flying rust-orange robot drone with one big eye and little propellers, cartoon',
+ 'robot_pylon': 'a small cute yellow robot shaped like a lighthouse tower on three legs, one big round blue eye, a lightning bolt on top, cartoon, whole robot visible, on a white background',
+ 'robot_colossus': 'a chunky red-orange patrol robot on stubby legs with big fists and a hot glowing grille, cartoon',
 }
 N = ("text, letters, words, watermark, logo, signature, multiple creatures, two characters, crowd, extra limbs, extra heads, duplicate, human, "
      "realistic photo, scary, horror, menacing, creepy, gore, blurry, cropped, sticker border, white outline border, frame, scenery, landscape, dark background, night sky, humanoid, human body, second creature, fish, wings, bat wings, dragon, flying, charmander, pokemon")
@@ -89,3 +105,6 @@ if __name__ == '__main__' and not os.environ.get('NOGEN'):
         res = list(ex.map(gen, jobs))
     print(res)
     print('fails:', [r for r in res if r[1] == 'FAIL'])
+
+
+

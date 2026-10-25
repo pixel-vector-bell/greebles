@@ -91,8 +91,21 @@ export const MORPHS: Morph[] = [
   k('lumen', 'Glow Greeble', 'fish', 'rare', 1, '✺', '#f0f0a0', { tags: ['night'], evo: [{ to: 'lumenar', lv: 24, item: 'sun' }] }),
   k('lumenar', 'Radiant Greeble', 'fish', 'rare', 2, '☀', '#fff0a0'),
   k('aurelith', 'Crystal Sovereign', 'mine', 'legendary', 1, '♛', '#a8f0ff'),
+  // ── 0.8: Void Rift ─────────────────────────────────────
+  k('riftling', 'Rift Pup', 'fight', 'common', 1, '◌', '#6a4aa0', { evo: [{ to: 'riftor', lv: 26 }] }),
+  k('riftor', 'Rift Greeble', 'fight', 'common', 2, '◍', '#503080', { evo: [{ to: 'riftmaw', lv: 34 }] }),
+  k('riftmaw', 'Rift Breaker', 'fight', 'common', 3, '◎', '#341a60'),
+  k('glimmet', 'Glimmer Greeble', 'fish', 'uncommon', 1, '✦', '#b0a0ff', { tags: ['storm'], evo: [{ to: 'glimmeron', lv: 28, night: true }] }),
+  k('glimmeron', 'Starfall Greeble', 'fish', 'uncommon', 2, '✧', '#8070e0'),
+  k('echolet', 'Echo Greeble', 'mine', 'rare', 1, '◔', '#60c0b0', { evo: [{ to: 'echoran', lv: 30, item: 'moon' }] }),
+  k('echoran', 'Echo Warden', 'mine', 'rare', 2, '◕', '#309080'),
+  k('riftking', 'Rift Sovereign', 'fight', 'legendary', 1, '♚', '#c8a8ff'),
   // ── Mythic ─────────────────────────────────────────────
   k('starborn', 'Starborn Greeble', 'fight', 'mythic', 1, '✺', '#ff8ad8', { tags: ['night'], nightOnly: true }),
+  k('tidecrown', 'Tidecrown Greeble', 'fish', 'mythic', 1, '♕', '#40e0e0'),
+  k('gearheart', 'Gearheart Greeble', 'fight', 'mythic', 1, '⚙', '#ffb040'),
+  k('verdance', 'Verdant Greeble', 'mine', 'mythic', 1, '❦', '#60e070'),
+  k('riftborn', 'Riftborn Greeble', 'mine', 'mythic', 1, '✪', '#e070ff'),
 ];
 
 export const RARITIES: Rarity[] = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
@@ -179,7 +192,7 @@ export const ELEMENTS: Record<Element, ElementDef> = {
   glass: { id: 'glass', name: 'Glass', icon: '💎', color: '#70d0e0', move: 'Prism Beam' },
   rust: { id: 'rust', name: 'Rust', icon: '🔩', color: '#b8704a', move: 'Scrap Toss' },
   storm: { id: 'storm', name: 'Storm', icon: '⚡', color: '#e0c840', move: 'Thunderclap' },
-  void: { id: 'void', name: 'Void', icon: '🌑', color: '#7a5aa8', move: 'Null Pulse' },
+  void: { id: 'void', name: 'Void', icon: '🌀', color: '#a07ae0', move: 'Null Pulse' },
 };
 /** Who each element is strong against. (The reverse is weak.) */
 export const STRONG: Record<Element, Element[]> = {
@@ -198,6 +211,7 @@ const FAMILY_EL: Record<string, Element> = {
   tidling: 'tide', iskari: 'storm', vesperid: 'void', thalune: 'tide', orryx: 'tide', caelith: 'storm', aelurion: 'tide',
   scrappling: 'rust', velm: 'rust', skarnox: 'moss', hokari: 'void', pyrrax: 'ember', nyxil: 'void', myrrhax: 'rust',
   shellit: 'tide', coralin: 'moss', boltik: 'storm', cogling: 'rust', shardy: 'glass', lumen: 'glass', aurelith: 'glass', starborn: 'void',
+  riftling: 'void', glimmet: 'storm', echolet: 'glass', riftking: 'void', tidecrown: 'tide', gearheart: 'rust', verdance: 'moss', riftborn: 'void',
 };
 const EL_OVERRIDE: Record<string, Element> = { klyxen: 'void', lumenar: 'ember', boltaros: 'storm', thalorn: 'void' };
 /** Moves charge up one per round; tap at MOVE_CHARGE, or it fires by itself (weaker) at MOVE_AUTO. */
@@ -254,10 +268,11 @@ export const REWARDS: Reward[] = [
   { id: 'c50', need: 50, label: '2 Star Snares + 3 Beacons', give: { star: 2, beacon: 3 } },
   { id: 'c55', need: 55, label: '+30 bag space', give: { bag: 30 } },
   { id: 'c60', need: 60, label: '5 Star Snares', give: { star: 5 } },
+  { id: 'c65', need: 65, label: '3 Star Snares + 3 Shiny Bait', give: { star: 3, lureRare: 3 } },
 ];
 
 // ── 0.3: areas of the planet ──────────────────────────────
-export type RegionId = 'ash' | 'tide' | 'rust' | 'glass';
+export type RegionId = 'ash' | 'tide' | 'rust' | 'glass' | 'void';
 export interface Boss { name: string; hp: number; atk: number; xp: number; scrap: number; el: Element }
 export interface Region {
   id: RegionId; name: string; icon: string; blurb: string;
@@ -284,6 +299,9 @@ export const REGIONS: Region[] = [
   { id: 'glass', name: 'Glass Spires', icon: '💎', blurb: 'Tall crystal towers that glow at night. The rarest Greebles live here.', lvl: 18, mult: 7, favor: 'mine',
     kinds: ['klyx', 'vesperid', 'hokari', 'shardy', 'lumen', 'iskari', 'phaest', 'caelith', 'nyxil'], legendary: 'aurelith',
     boss: { name: 'Prism Sentinel', hp: 2500, atk: 45, xp: 2000, scrap: 12000, el: 'glass' } },
+  { id: 'void', name: 'Void Rift', icon: '🕳️', blurb: 'A crack in the planet where the sky leaks in. Robots guard it fiercely.', lvl: 24, mult: 12, favor: 'fight',
+    kinds: ['riftling', 'glimmet', 'echolet', 'hokari', 'nyxil', 'vesperid', 'lumen', 'klyx'], legendary: 'riftking',
+    boss: { name: 'Null Engine', hp: 5000, atk: 65, xp: 4000, scrap: 30000, el: 'void' } },
 ];
 export const region = (id: string): Region => REGIONS.find(r => r.id === id) ?? REGIONS[0];
 export const regionIndex = (id: string) => Math.max(0, REGIONS.findIndex(r => r.id === id));
@@ -328,6 +346,25 @@ export const PERKS: PerkDef[] = [
 export const perkCost = (lv: number) => lv + 1;
 /** Each signal home makes the robots this much tougher — and pay this much more. */
 export const SIGNAL_STEP = 0.5;
+
+// ── 0.8: Mythic Hunts ──────────────────────────────────────
+/** Tally keys counted over the whole game: 'catch', 'catch:<element>', 'perfect', 'patrol', 'wreck', 'boss:<area>', 'prism', 'evolve', 'expo', 'craft', 'night'. */
+export interface HuntStep { label: string; key: string; need: number }
+export interface Hunt { id: string; mythic: string; name: string; blurb: string; reg: RegionId; steps: HuntStep[]; night?: boolean }
+export const HUNTS: Hunt[] = [
+  { id: 'h_verd', mythic: 'verdance', name: 'The Green Whisper', reg: 'ash', blurb: 'Old Greebles say something green sleeps under Ash Flats.',
+    steps: [{ label: 'Catch 15 Moss Greebles', key: 'catch:moss', need: 15 }, { label: 'Make 10 things at the Workbench', key: 'craft', need: 10 }, { label: 'Evolve 5 Greebles', key: 'evolve', need: 5 }] },
+  { id: 'h_tide', mythic: 'tidecrown', name: 'Crown of the Tides', reg: 'tide', blurb: 'Bubbles rise in rings in the Tide Pools. Something is down there.',
+    steps: [{ label: 'Catch 25 Tide Greebles', key: 'catch:tide', need: 25 }, { label: 'Land 15 Perfect throws', key: 'perfect', need: 15 }, { label: 'Beat the Tide Dredger 3 times', key: 'boss:tide', need: 3 }] },
+  { id: 'h_gear', mythic: 'gearheart', name: 'The Ticking Heart', reg: 'rust', blurb: 'Deep in the junk you can hear ticking. It is not a robot.',
+    steps: [{ label: 'Break 40 patrol robots', key: 'patrol', need: 40 }, { label: 'Clear 6 robot wrecks', key: 'wreck', need: 6 }, { label: 'Beat the Scrap Colossus 3 times', key: 'boss:rust', need: 3 }] },
+  { id: 'h_star', mythic: 'starborn', name: 'Falling Star', reg: 'glass', night: true, blurb: 'On stormy nights, something bright falls over the Glass Spires.',
+    steps: [{ label: 'Catch 30 Greebles at night', key: 'night', need: 30 }, { label: 'Catch 2 Prismatic Greebles', key: 'prism', need: 2 }, { label: 'Send 3 daily expeditions', key: 'expo', need: 3 }] },
+  { id: 'h_rift', mythic: 'riftborn', name: 'Born of the Rift', reg: 'void', blurb: 'The Void Rift hums. Something wants out.',
+    steps: [{ label: 'Catch 30 Void Greebles', key: 'catch:void', need: 30 }, { label: 'Beat the Null Engine 2 times', key: 'boss:void', need: 2 }, { label: 'Catch 100 Greebles (any)', key: 'catch', need: 100 }] },
+];
+/** Once a hunt is done, its Mythic waits this long in its area. */
+export const HUNT_SPAWN_MS = 60 * 60 * 1000;
 export const EXPEDITION_MS = 4 * 60 * 60 * 1000;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const WEEK_MS = 7 * DAY_MS;

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { World, Spawn } from '../sim/world';
 import { ITEMS, RARITY_LABEL, SNARES, THROW_LABEL, elementOf, morph, roleLabel, type SnareId } from '../sim/content';
 import { Badge, El, Stars } from './bits';
+import { sfx } from './sfx';
 
 /**
  * The catch screen. The Greeble bobs around; a ring around it shrinks and grows.
@@ -55,11 +56,14 @@ export function Encounter({ w, onDone, act }: { w: World; onDone: () => void; ac
     result.current = { caught: w.s.stats.caught > caughtBefore, fled: w.s.stats.fled > fledBefore, reward: reward?.label };
     const got = evs.find(e => e.t === 'caught') as { first: boolean; scrap: number } | undefined;
     setLabel([THROW_LABEL[q], got ? `${got.first ? 'NEW! ' : ''}+${got.scrap} scrap${reward ? ` · Guide reward: ${reward.label}` : ''}` : ''].filter(Boolean).join(' '));
-    setPhase('flying');
-    setTimeout(() => setPhase('wobble'), 450);
+    setPhase('flying'); sfx.throw();
+    if (q === 3) setTimeout(() => sfx.perfect(), 120);
+    setTimeout(() => { setPhase('wobble'); sfx.wobble(); }, 450);
     setTimeout(() => {
       const r2 = result.current!;
       setPhase(r2.caught ? 'caught' : r2.fled ? 'fled' : 'broke');
+      if (r2.caught) (x.prism ? sfx.prism : ['epic', 'legendary', 'mythic'].includes(m.rarity) ? sfx.caughtRare : sfx.caught)();
+      else if (r2.fled) sfx.fled(); else sfx.broke();
       act({ ok: true });
       if (!r2.caught && !r2.fled) setTimeout(() => setPhase('aim'), 900);
     }, 450 + (result.current.caught ? 1800 : 1100));
@@ -121,6 +125,7 @@ function ResultCard({ phase, label, m, prism, stars, lv, onDone }: { phase: 'cau
         <p><b>{prism && '✨ '}{m.name}</b> lv {lv} joined you.</p>
         <p><Stars n={stars ?? 1} /></p>
         {prism && <p className="gr-prism-text">A PRISMATIC Greeble! About 1 in 400.</p>}
+        {m.rarity === 'mythic' && <p className="gr-prism-text">🌠 A MYTHIC Greeble! One of the rarest on the planet.</p>}
         {label && <p className="gr-dim">{label}</p>}
       </>) : (<>
         <h2>It ran off…</h2>

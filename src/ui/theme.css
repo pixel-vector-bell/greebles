@@ -261,3 +261,15 @@ button:disabled { cursor: default; opacity: .45; }
 @keyframes gr-prism-art { 0% { filter: saturate(1.6) hue-rotate(0deg) brightness(1.1); } 100% { filter: saturate(1.6) hue-rotate(360deg) brightness(1.1); } }
 @keyframes gr-sweep { 0% { background-position: 150% 0; } 100% { background-position: -50% 0; } }
 @keyframes gr-spin-bg { to { filter: hue-rotate(360deg); } }
+
+/* 0.8: Mythic Hunts, robot art */
+.gr-robot { align-items: center; text-align: center; gap: 2px; }
+.gr-hunts h2 { color: #ffb0f0; }
+.gr-hunt { border-top: 1px solid #263140; padding: 8px 0; }
+.gr-hunt.locked { opacity: .55; }
+.gr-hunt.ready .gr-badge, .gr-hunt.out .gr-badge { box-shadow: 0 0 14px #ff8ad8aa; border-radius: 50%; }
+.gr-badge.mystery { background: radial-gradient(circle, #3a2a50, #1a1428) !important; color: #c8a8ff; font-weight: 700; font-size: 22px; display: grid; place-items: center; border-radius: 50%; }
+.gr-steps { display: grid; gap: 3px; margin: 6px 0 0 56px; font-size: 12px; }
+.gr-steps > div { display: flex; justify-content: space-between; gap: 8px; color: #b8c2d0; }
+.gr-steps > div.done { color: #7ad08a; }
+.gr-steps b { font-variant-numeric: tabular-nums; }

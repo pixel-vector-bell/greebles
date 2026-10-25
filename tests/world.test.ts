@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { World, newGame, migrate } from '../src/sim/world';
 import { SHIP_PARTS, PERKS, DAY_MS } from '../src/sim/content';
-import { ELEMENTS, FAMILIES, MORPHS, RECIPES, REGIONS, RULES, SPAWNABLE, STRONG, craterAt, elementOf, isNight, morph, stormAt, typeMult } from '../src/sim/content';
+import { ELEMENTS, FAMILIES, HUNTS, MORPHS, RECIPES, REGIONS, RULES, SPAWNABLE, STRONG, craterAt, elementOf, isNight, morph, stormAt, typeMult } from '../src/sim/content';
 
 const T0 = 1_800_000_000_000;
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -89,7 +89,9 @@ describe('the wilds', () => {
   it('rarity tiers roughly follow 55/27/12/5/0.9', () => {
     const w = fresh(5);
     const c: Record<string, number> = {};
-    for (let i = 0; i < 20_000; i++) { const m = w.rollKind(T0 + 10 * MIN); c[m.rarity] = (c[m.rarity] ?? 0) + 1; }
+    // the weekly swarm boosts one kind 8×; measure in a week where the swarm kind is common
+    let t = T0 + 10 * MIN; while (w.swarmKind(t).rarity !== 'common') t += 7 * 24 * HOUR;
+    for (let i = 0; i < 20_000; i++) { const m = w.rollKind(t); c[m.rarity] = (c[m.rarity] ?? 0) + 1; }
     expect(c.common / 20_000).toBeGreaterThan(0.45);
     expect(c.legendary ?? 0).toBe(0);  // no Legendary until you beat the area boss…
     expect(c.mythic ?? 0).toBe(0);     // …and the Mythic only comes from its own stormy-night event
@@ -242,7 +244,7 @@ describe('saves', () => {
     const old = { scrap: 120, bag: [{ u: 'g1', sp: 'draug', lv: 12, xp: 5 }, { u: 'g2', sp: 'nulith', lv: 3, xp: 0 }, { u: 'g3', sp: 'gone', lv: 1 }],
       camp: ['g2', null, null, null], huntAt: 0, campCarry: 0, fight: null, seen: { draug: true }, stats: { caught: 2 }, lastSeen: T0, tips: { walk: true } };
     const s = migrate(old, T0);
-    expect(s.version).toBe(6);
+    expect(s.version).toBe(7);
     expect(s.region).toBe('ash'); expect(s.unlocked).toBe(1);
     expect(s.bag.map(g => g.sp)).toEqual(['draug', 'nulith']);
     expect(s.bag[0].stars).toBe(3);
@@ -524,5 +526,61 @@ describe('0.6: ship, signal home, perks, expeditions, swarm', () => {
     const w = fresh(3); const sw = w.swarmKind(T0).id;
     let n = 0; for (let i = 0; i < 3000; i++) if (w.rollKind(T0).id === sw) n++;
     expect(n / 3000).toBeGreaterThan(0.15);
+  });
+});
+
+
+describe('0.8: Mythic Hunts + Void Rift', () => {
+  it('has a 5th area with its own boss and Legendary', () => {
+    expect(REGIONS.length).toBe(5);
+    const v = REGIONS[4];
+    expect(v.id).toBe('void'); expect(morph(v.legendary).rarity).toBe('legendary');
+    for (const k of v.kinds) expect(morph(k).stage).toBe(1);
+  });
+  it('every Mythic has exactly one hunt, and Mythics never roll in normal spawns', () => {
+    const mythics = MORPHS.filter(m => m.rarity === 'mythic');
+    expect(mythics.length).toBe(5);
+    for (const m of mythics) expect(HUNTS.filter(h => h.mythic === m.id).length).toBe(1);
+    const w = new World(newGame(5, T0));
+    w.s.unlocked = 5;
+    for (const r of REGIONS) { w.s.region = r.id; w.s.bossBeaten[r.id] = T0; for (let i = 0; i < 400; i++) expect(morph(w.addSpawn(T0, 'wild').sp).rarity).not.toBe('mythic'); }
+  });
+  it('a hunt finishes from tallies, gives a Star Snare, and calls its Mythic in its area', () => {
+    const w = new World(newGame(9, T0));
+    const h = HUNTS.find(x => x.id === 'h_verd')!;
+    expect(w.huntState(h, T0)).toBe('open');
+    expect(w.callMythic(h.id, T0).ok).toBe(false);
+    const stars = w.count('star');
+    w.s.tally['catch:moss'] = 15; w.s.tally['craft'] = 9; w.s.tally['evolve'] = 5;
+    w.s.items.ore = 10;
+    const ri = RECIPES.findIndex(r => r.out === 'snare' && r.cost.ore);
+    expect(w.craft(ri).ok).toBe(true);
+    expect(w.s.hunts[h.id]).toBeTruthy();
+    expect(w.count('star')).toBe(stars + 1);
+    expect(w.drain().some(e => e.t === 'huntDone')).toBe(true);
+    expect(w.huntState(h, T0)).toBe('ready');
+    expect(w.callMythic(h.id, T0).ok).toBe(true);
+    const x = w.s.spawns.find(y => y.sp === 'verdance')!;
+    expect(x.reg).toBe('ash'); expect(x.src).toBe('mythic');
+    expect(w.huntState(h, T0)).toBe('out');
+    expect(w.callMythic(h.id, T0).ok).toBe(false);
+  });
+  it('a locked area hunt stays locked; tallies count catches by element', () => {
+    const w = new World(newGame(11, T0));
+    expect(w.huntState(HUNTS.find(x => x.id === 'h_rift')!, T0)).toBe('locked');
+    const sp = w.addSpawn(T0, 'wild', 'tidling');
+    w.startEncounter(sp.id); w.s.items.star = 1;
+    expect(w.throwSnare('star', 3).ok).toBe(true);
+    expect(w.tallyOf('catch')).toBe(1); expect(w.tallyOf('catch:tide')).toBe(1); expect(w.tallyOf('perfect')).toBe(1);
+  });
+  it('hunt progress survives a signal home and old saves', () => {
+    const w = new World(newGame(13, T0));
+    w.s.tally['patrol'] = 12; w.s.hunts['h_tide'] = T0;
+    for (const p of ['hull', 'engine', 'fuel', 'antenna', 'nav'] as const) w.s.ship[p] = true;
+    expect(w.signalHome([], T0).ok).toBe(true);
+    expect(w.tallyOf('patrol')).toBe(12); expect(w.s.hunts['h_tide']).toBe(T0);
+    const old: any = JSON.parse(JSON.stringify(w.s)); delete old.tally; delete old.hunts; old.version = 6;
+    const m = migrate(old, T0);
+    expect(m.tally).toEqual({}); expect(m.hunts).toEqual({}); expect(m.version).toBe(7);
   });
 });

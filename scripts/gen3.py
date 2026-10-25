@@ -4,7 +4,7 @@ os.environ['NOGEN'] = '1'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from genset import D, STAGE, BOSSES
 c = boto3.client('bedrock-runtime', region_name='us-west-2')
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'v3'); os.makedirs(OUT, exist_ok=True)
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.environ.get('OUTDIR', 'v3')); os.makedirs(OUT, exist_ok=True)
 TEMPLATE = ("Cute chibi goblin creature, front-facing symmetrical standing pose, full body, very large smooth dome-shaped head wider than its small pear-shaped body, "
   "two big triangular pointed ears sticking diagonally up and out like a gremlin, huge widely spaced oval glossy eyes with thick black outline and white sparkle highlights, "
   "tiny nose and small gentle smile, pale cream oval belly patch, short arms at its sides, short squat legs with three-clawed feet, thin curly tail, no wings, "
