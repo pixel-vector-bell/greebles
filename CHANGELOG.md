@@ -1,5 +1,12 @@
 # Greebles — What's New
 
+## 0.9.0 — Eggs, daily tasks & a fresh look
+- 🪺 Nest & eggs (Camp tab): put two Greebles from the same family in the nest and they lay an egg about every 2 hours, even while you're away. Eggs hatch over time, and every Greeble you catch warms them by 10 minutes. Eggs often have more stars, and they're 3× more likely to be ✨ Prismatic (9× if a parent is Prismatic). The incubator holds 3 eggs.
+- 📋 Daily tasks (Wilds tab): 3 small goals every day, like "Catch 4 Tide Greebles" or "Land 3 Perfect throws". Each one pays scrap and Good Snares, and finishing all 3 gives a bonus of 2 Great Snares and a Shiny Bait.
+- 🎨 Each area has its own painted background now, and it gets darker at night and in storms.
+- ✨ Evolving and hatching have a bright flash, and ready eggs wiggle.
+- 👋 New players get a short walkthrough: catch your first Greeble, put it in camp, and find your daily tasks. You can skip it, and it's off for anyone who already plays.
+
 ## 0.8.0 — Mythic Hunts, the Void Rift & sound
 - 🌠 Mythic Hunts! There are now 5 Mythic Greebles, and each has its own hunt with 3 goals (like "Catch 25 Tide Greebles" or "Break 40 patrol robots"). Finish a hunt to get a Star Snare and call its Mythic into its area. If it gets away, you can call it again. Hunts are at the top of the Guide tab, and progress counts across all your trips home.
 - 🕳️ A 5th area: the Void Rift. Beat the Prism Sentinel to open it. It has 7 new Greebles (the Rift, Glimmer and Echo families), a new Legendary (the Rift Sovereign) and a new boss, the Null Engine.

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { World, newGame, type GameEvent, type Greeble } from '../sim/world';
+import { World, newGame, type GameEvent, type Greeble, type Egg } from '../sim/world';
+import { Intro } from './Intro';
 import {
   FAMILIES, ITEMS, MORPHS, RARITY_LABEL, REWARDS, ROBOTS, RULES, SNARES, craterAt, isNight, morph, roleLabel, stormAt, untilFlip, xpNeed,
   REGIONS, TEAM_MAX, UPGRADES, region, robotIn,
   ELEMENTS, MOVE_AUTO, MOVE_CHARGE, RECIPES, STRONG, elementOf, typeMult,
-  LURES, SHIP_PARTS, PERKS, perkCost, EXPEDITION_MS, DAY_MS, WEEK_MS, HUNTS,
+  LURES, SHIP_PARTS, PERKS, perkCost, EXPEDITION_MS, DAY_MS, WEEK_MS, HUNTS, EGG_MAX, familyRoot,
   type Element, type ItemId, type LureId, type RegionId,
 } from '../sim/content';
 import { saveLocal, wipeLocal } from '../save/storage';
@@ -44,6 +45,10 @@ function message(e: GameEvent, w: World): string | null {
     case 'move': { const g = w.get(e.u); return g ? `${ELEMENTS[elementOf(g.sp)].icon} ${ELEMENTS[elementOf(g.sp)].move}! ${n(e.dmg)} damage${e.mult > 1 ? ' — super strong!' : ''}` : null; }
     case 'bossLost': return `Your team was beaten by the ${region(e.reg).boss.name}. Level up, evolve, and try again!`;
     case 'huntDone': return `🌠 Mythic Hunt complete! Call ${morph(e.mythic).name} from the Guide tab (+1 Star Snare).`;
+    case 'eggLaid': return `🥚 Your nest laid ${/^[AEIOU]/.test(morph(e.sp).name) ? 'an' : 'a'} ${morph(e.sp).name} egg!`;
+    case 'eggReady': return `🐣 An egg is ready to hatch! (Camp)`;
+    case 'task': return `📋 Daily task done: ${e.label}!`;
+    case 'taskBonus': return '🎉 All 3 daily tasks done! Bonus: 2 Great Snares + a Shiny Bait.';
     case 'huntCall': return `🌠 ${morph(e.mythic).name} has appeared in ${region(HUNTS.find(h => h.id === e.id)!.reg).name}!`;
     default: return null;
   }
@@ -70,9 +75,10 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
   const [tab, setTab] = useState<Tab>('wilds');
   const [toast, setToast] = useState<string | null>(null);
   const [menu, setMenu] = useState<null | 'settings' | 'news' | 'dev'>(null);
-  const [away, setAway] = useState<null | { ms: number; scrap: number; levels: number; waiting: number; got: Partial<Record<ItemId, number>> }>(null);
+  const [away, setAway] = useState<null | { ms: number; scrap: number; levels: number; waiting: number; got: Partial<Record<ItemId, number>>; eggs: number }>(null);
   const [bossWin, setBossWin] = useState<null | Extract<GameEvent, { t: 'bossWon' }>>(null);
   const [evolving, setEvolving] = useState<null | { from: string; to: string; prism: boolean }>(null);
+  const [hatched, setHatched] = useState<null | { sp: string; prism: boolean; stars: number }>(null);
   const [encOpen, setEncOpen] = useState(() => !!world.s.enc);
   const [encKey, setEncKey] = useState(0);
   const [speed, setSpeed] = useState(1);
@@ -83,10 +89,13 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
     const evo = evs.find(e => e.t === 'evolved') as Extract<GameEvent, { t: 'evolved' }> | undefined;
     const bw = evs.find(e => e.t === 'bossWon') as Extract<GameEvent, { t: 'bossWon' }> | undefined;
     if (bw) setBossWin(bw);
+    const ht = evs.find(e => e.t === 'hatched') as Extract<GameEvent, { t: 'hatched' }> | undefined;
+    if (ht) setHatched({ sp: ht.sp, prism: ht.prism, stars: ht.stars });
     if (evo) setEvolving({ from: evo.from, to: evo.to, prism: !!world.get(evo.u)?.prism });
     // sounds (one per batch, most exciting wins)
     const has = (t: GameEvent['t']) => evs.some(e => e.t === t);
     if (bw) sfx.boss(); else if (evo) sfx.evolve(); else if (has('huntDone') || has('huntCall')) sfx.mythic();
+    else if (has('hatched')) sfx.caughtRare(); else if (has('taskBonus') || has('task')) sfx.win(); else if (has('eggLaid') || has('eggReady')) sfx.spawn();
     else if (has('fightWon')) sfx.win(); else if (has('fightLost') || has('bossLost')) sfx.lose();
     else if (has('move')) sfx.move(); else if (has('crafted') || has('sold') || has('shipPart')) sfx.coin();
     else if (evs.some(e => e.t === 'spawn' && (e.prism || e.src === 'mythic'))) sfx.mythic();
@@ -101,7 +110,7 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
     const now = Date.now();
     const gone = now - world.s.lastSeen;
     const r = world.catchUp(gone, now);
-    if (gone >= 10 * 60_000 && (r.scrap > 0 || r.waiting > 0)) setAway(r);
+    if (gone >= 10 * 60_000 && (r.scrap > 0 || r.waiting > 0 || r.eggs > 0) && world.s.intro >= 99) setAway(r);
     let last = Date.now();
     const iv = window.setInterval(() => {
       const t = Date.now();
@@ -126,11 +135,13 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
     return () => { clearInterval(iv); document.removeEventListener('visibilitychange', vis); window.removeEventListener('pagehide', hide); off(); };
   }, []);
 
-  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 3200); return () => clearTimeout(t); }, [toast]);
+  // toasts wait while a big pop-up is open, then show for 3.2 s
+  const popup = !!(evolving || hatched || bossWin);
+  useEffect(() => { if (!toast || popup) return; const t = setTimeout(() => setToast(null), 3200); return () => clearTimeout(t); }, [toast, popup]);
 
   const s = world.s;
   const now = Date.now();
-  const tip = TIPS.find(t => t.tab === tab && !s.tips[t.id]);
+  const tip = s.intro < 99 ? undefined : TIPS.find(t => t.tab === tab && !s.tips[t.id]);
   const closeTip = (id: string) => { s.tips[id] = true; save(); redraw(); };
   const readyToEvolve = s.bag.some(g => world.evoOptions(g, now).some(o => o.ready));
 
@@ -159,7 +170,7 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
       <main className="gr-main">
         {tip && <div className="gr-tip"><p>💡 {tip.text}</p><button onClick={() => closeTip(tip.id)}>Got it</button></div>}
         {tab === 'wilds' && <WildsView w={world} now={now} engage={engage} act={act} />}
-        {tab === 'camp' && <CampView w={world} act={act} />}
+        {tab === 'camp' && <CampView w={world} act={act} now={now} />}
         {tab === 'bag' && <BagView w={world} act={act} now={now} />}
         {tab === 'fight' && <FightView w={world} act={act} now={now} />}
         {tab === 'shop' && <ShopView w={world} act={act} now={now} />}
@@ -173,19 +184,21 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
             <span className="gr-ti">{t.icon}</span><span>{t.label}</span>
             {t.id === 'wilds' && tab !== 'wilds' && world.here.length > 0 && <i className="gr-count">{world.here.length}</i>}
             {t.id === 'bag' && readyToEvolve && <i className="gr-dot gold" />}
+            {t.id === 'camp' && s.eggs.some(e => e.left <= 0) && <i className="gr-dot gold" />}
             {t.id === 'guide' && HUNTS.some(h => world.huntState(h, now) === 'ready') && <i className="gr-dot gold" />}
             {t.id === 'fight' && (s.fight || s.wreck) && <i className={`gr-dot ${s.wreck ? 'gold' : 'red'}`} />}
           </button>
         ))}
       </nav>
 
-      {toast && <div className="gr-toast" onClick={() => setToast(null)}>{toast}</div>}
+      {toast && !evolving && !hatched && !bossWin && !encOpen && <div className="gr-toast" onClick={() => setToast(null)}>{toast}</div>}
 
       {encOpen && <Encounter key={encKey} w={world} act={act} onDone={() => { setEncOpen(false); world.s.enc = null; save(); redraw(); }} />}
 
       {evolving && (
         <div className="gr-sheet-back" onClick={() => setEvolving(null)}>
           <div className={`gr-sheet gr-evo ${evolving.prism ? 'prism' : ''}`} onClick={e => e.stopPropagation()}>
+            <div className="gr-evo-flash" />
             <h2>Your {morph(evolving.from).name} is changing!</h2>
             <div className="gr-evo-row">
               <div className="gr-evo-from"><Badge m={morph(evolving.from)} size={72} prism={evolving.prism} /></div>
@@ -194,6 +207,20 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
             </div>
             <p>It became a <b>{evolving.prism && '✨ '}{morph(evolving.to).name}</b>!</p>
             <button className="gr-btn-big" onClick={() => setEvolving(null)}>Amazing</button>
+          </div>
+        </div>
+      )}
+
+      {hatched && (
+        <div className="gr-sheet-back" onClick={() => setHatched(null)}>
+          <div className={`gr-sheet gr-hatch ${hatched.prism ? 'prism' : ''}`} onClick={e => e.stopPropagation()}>
+            <div className="gr-evo-flash" />
+            <h2>🐣 It hatched!</h2>
+            <div className="gr-center gr-evo-to"><Badge m={morph(hatched.sp)} size={104} prism={hatched.prism} /></div>
+            <p>A baby <b>{hatched.prism && '✨ '}{morph(hatched.sp).name}</b> joined you.</p>
+            <p><Stars n={hatched.stars} /></p>
+            {hatched.prism && <p className="gr-prism-text">A PRISMATIC egg! Lucky!</p>}
+            <button className="gr-btn-big" onClick={() => setHatched(null)}>Welcome!</button>
           </div>
         </div>
       )}
@@ -218,6 +245,7 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
             <p>You were gone {fmtDur(away.ms)}{away.ms >= world.offlineCap ? ` (camp counts up to ${Math.round(world.offlineCap / 3600000)} hours)` : ''}.</p>
             {away.scrap > 0 && <p className="gr-big">+{n(away.scrap)} scrap</p>}
             {Object.keys(away.got).length > 0 && <p>Your campers brought back {(Object.entries(away.got) as [ItemId, number][]).map(([k, v]) => `${ITEMS[k].icon} ${n(v)} ${ITEMS[k].name}`).join(' · ')}</p>}
+            {away.eggs > 0 && <p>🥚 Your nest laid {away.eggs} egg{away.eggs > 1 ? 's' : ''}.</p>}
             {away.levels > 0 && <p>Your campers went up {away.levels} level{away.levels > 1 ? 's' : ''}.</p>}
             {away.waiting > 0 && <p className="gr-big2">🌿 {away.waiting} Greeble{away.waiting > 1 ? 's are' : ' is'} out in the wilds!</p>}
             <button className="gr-btn-big" onClick={() => { setAway(null); setTab('wilds'); }}>{away.waiting > 0 ? 'Go catch them' : 'Nice'}</button>
@@ -238,6 +266,7 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
           </div>
         </div>
       )}
+      {s.intro < 99 && !encOpen && !evolving && !hatched && <Intro w={world} tab={tab} setTab={setTab} save={() => { save(); redraw(); }} />}
       {menu === 'dev' && dev && (
         <div className="gr-sheet-back" onClick={() => setMenu(null)}>
           <div className="gr-sheet" onClick={e => e.stopPropagation()}>
@@ -248,6 +277,8 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
               <button className="gr-btn" onClick={() => { for (let i = 0; i < 3; i++) world.addSpawn(Date.now(), 'wild'); act({ ok: true }); }}>+3 Greebles</button>
               <button className="gr-btn" onClick={() => { world.addSpawn(Date.now(), 'wild').prism = true; act({ ok: true }); }}>+1 Prismatic</button>
               <button className="gr-btn" onClick={() => { world.addSpawn(Date.now(), 'wild', 'quorvex'); act({ ok: true }); }}>+Legendary</button>
+              <button className="gr-btn" onClick={() => { for (const e of s.eggs) e.left = 0; s.nestCarry = 2 * 3600e3; world.advance(1, Date.now()); act({ ok: true }); }}>Eggs ready</button>
+              <button className="gr-btn" onClick={() => { s.intro = 0; save(); setMenu(null); setTab('wilds'); redraw(); }}>Replay intro</button>
               <button className="gr-btn" onClick={() => { for (const h of HUNTS) for (const st of h.steps) s.tally[st.key] = Math.max(s.tally[st.key] ?? 0, st.need); s.unlocked = REGIONS.length; act({ ok: true }); }}>Finish all hunts</button>
               <button className="gr-btn" onClick={() => { s.scrap += 1000; s.items.snare = world.count('snare') + 20; save(); redraw(); }}>+1000 scrap, +20 snares</button>
               <button className="gr-btn" onClick={() => { s.nextWreckAt = 0; world.updateWilds(Date.now() + 30_000); act({ ok: true }); }}>Robot wreck</button>
@@ -286,13 +317,14 @@ function WildsView({ w, now, engage, act }: V & { now: number; engage: (id: stri
         })}
       </div>
       <p className="gr-dim small gr-region-blurb">{reg.icon} <b>{reg.name}</b> — {reg.blurb}{reg.lvl ? ` Wild Greebles here are +${reg.lvl} levels.` : ''} {roleLabel(reg.favor)} campers work 1.5× better here.{s.bossBeaten[reg.id] ? ` ${morph(reg.legendary).name} roams here now…` : ''}</p>
-      <section className={`gr-wilds reg-${reg.id} ${isNight(now) ? 'night' : ''} ${storm?.on ? 'storm' : ''}`}>
+      <section className={`gr-wilds reg-${reg.id} ${isNight(now) ? 'night' : ''} ${storm?.on ? 'storm' : ''}`} style={{ backgroundImage: `url(./art/bg_${reg.id}.webp)` }}>
+        <div className="gr-wilds-shade" />
         {spawns.map(x => {
           const m = morph(x.sp);
           return (
             <button key={x.id} className={`gr-spawn src-${x.src} ${x.prism ? 'prism' : ''}`} style={{ left: `${x.x * 100}%`, top: `${x.y * 100}%` }} onClick={() => engage(x.id)} title={m.name}>
               <Badge m={m} size={46} prism={x.prism} />
-              <small className={`r-${m.rarity}`}>{s.seen[x.sp] ? m.name : '???'}</small>
+              <small className={s.seen[x.sp] ? `r-${m.rarity}` : 'unk'}>{s.seen[x.sp] ? m.name : '???'}</small>
             </button>
           );
         })}
@@ -300,6 +332,7 @@ function WildsView({ w, now, engage, act }: V & { now: number; engage: (id: stri
         <div className="gr-wilds-count">{spawns.length} out there</div>
       </section>
 
+      <DailyCard w={w} act={act} now={now} />
       <section className="gr-card">
         <h2>Hot spots</h2>
         <div className="gr-spot">
@@ -370,7 +403,71 @@ function Row({ g, w, right, now }: { g: Greeble; w: World; right?: React.ReactNo
   );
 }
 
-function CampView({ w, act }: V) {
+function DailyCard({ w, act, now }: V & { now: number }) {
+  const d = w.ensureDaily(now);
+  const left = DAY_MS - (now % DAY_MS);
+  return (
+    <section className="gr-card gr-daily">
+      <h2>📋 Today's tasks <span className="gr-dim small">· new ones in {fmtTime(left)}</span></h2>
+      {d.tasks.map((t, i) => { const v = w.taskProgress(t); const ready = v >= t.need && !t.done; return (
+        <div key={i} className={`gr-task ${t.done ? 'done' : ''}`}>
+          <div className="gr-grow"><b>{t.done ? '✅ ' : ''}{t.label}</b>
+            <div className="gr-bar thin"><div style={{ width: `${(100 * v) / t.need}%` }} /></div></div>
+          <span className="gr-dim small">{v}/{t.need}</span>
+          {t.done ? <span className="gr-dim small">Done</span>
+            : <button className={`gr-btn ${ready ? 'o' : ''}`} disabled={!ready} onClick={() => act(w.claimTask(i, Date.now()))}>{ready ? 'Claim' : `🔩 ${n(w.taskScrap)}`}</button>}
+        </div>); })}
+      <p className="gr-dim small">Each task: 🔩 {n(w.taskScrap)} scrap + 3 Good Snares. Finish all 3 for a bonus: 2 Great Snares + a 🌈 Shiny Bait{d.bonus ? ' ✅' : ''}.</p>
+    </section>
+  );
+}
+
+function EggView({ e, w, act }: { e: Egg; w: World; act: V['act'] }) {
+  const ready = e.left <= 0; const pct = 100 * (1 - e.left / e.total);
+  const m = morph(e.sp);
+  return (
+    <div className={`gr-egg ${ready ? 'ready' : ''}`}>
+      <div className="gr-egg-shell" style={{ ['--egg' as any]: m.color }}><span>🥚</span></div>
+      <small>{w.s.seen[e.sp] ? m.name : 'Mystery'} egg</small>
+      {ready ? <button className="gr-btn o" onClick={() => act(w.hatch(e.id))}>Hatch!</button>
+        : <><div className="gr-bar thin"><div style={{ width: `${pct}%` }} /></div><small className="gr-dim">{fmtTime(e.left)}</small></>}
+    </div>
+  );
+}
+
+function NestCard({ w, act, now }: V & { now: number }) {
+  const s = w.s;
+  const [pick, setPick] = useState<0 | 1 | null>(null);
+  void now;
+  const why = w.nestWhy();
+  const first = s.nest[0] ? w.get(s.nest[0]) : s.nest[1] ? w.get(s.nest[1]) : undefined;
+  const choices = s.bag.filter(g => !w.busy(g.u) && !w.canNest(g) && (!first || familyRoot(first.sp) === familyRoot(g.sp)))
+    .sort((a, b) => morph(a.sp).name.localeCompare(morph(b.sp).name) || b.stars - a.stars).slice(0, 24);
+  return (
+    <section className="gr-card gr-nest">
+      <h2>🪺 Nest & eggs</h2>
+      <p className="gr-dim small">Put two Greebles from the same family in the nest. They lay an egg about every 2 hours, even while you're away. Eggs hatch over time, and every Greeble you catch warms them by 10 minutes. Eggs often have better stars, and they're 3× more likely to be ✨ Prismatic (9× if a parent is Prismatic).</p>
+      <div className="gr-nest-row">
+        {([0, 1] as const).map(i => { const u = s.nest[i]; const g = u ? w.get(u) : undefined; return (
+          <div key={i} className="gr-nest-spot">
+            {g ? <><Badge m={morph(g.sp)} size={52} prism={g.prism} /><small>{morph(g.sp).name}</small><small><Stars n={g.stars} /></small><button className="gr-btn" onClick={() => act(w.fromNest(i))}>Take out</button></>
+              : <button className="gr-nest-empty" onClick={() => setPick(pick === i ? null : i)}>＋<small>Add</small></button>}
+          </div>); })}
+        <div className="gr-nest-status">{why ? <span className="gr-dim small">{why}</span> : <span className="gr-ok small">🥚 Next egg in {fmtTime(w.nextEggIn ?? 0)}</span>}</div>
+      </div>
+      {pick !== null && (
+        <div className="gr-team">{choices.length ? choices.map(g => (
+          <button key={g.u} className="gr-pick" onClick={() => { act(w.toNest(g.u, pick)); setPick(null); }}>
+            <Badge m={morph(g.sp)} size={34} prism={g.prism} /><small>{morph(g.sp).name}</small><small className="gr-gold">{'★'.repeat(g.stars)}</small>
+          </button>)) : <div className="gr-empty">{first ? `No free ${morph(familyRoot(first.sp)).name}-family Greebles. Bench one from camp or catch another.` : 'No free Greebles. Bench some from camp first.'}</div>}</div>
+      )}
+      <h3 className="gr-sub-h">Incubator · {s.eggs.length}/{EGG_MAX}</h3>
+      <div className="gr-eggs">{s.eggs.length ? s.eggs.map(e => <EggView key={e.id} e={e} w={w} act={act} />) : <div className="gr-empty">No eggs yet.</div>}</div>
+    </section>
+  );
+}
+
+function CampView({ w, act, now }: V & { now: number }) {
   const s = w.s;
   const jobTag = (g: Greeble) => { const j = w.jobOf(g); return <span className="gr-job">{w.favored(g) && '⭐'}{ITEMS[j.item].icon} {Math.round(j.chance * 100)}%</span>; };
   const free = s.bag.filter(g => !w.busy(g.u)).sort((a, b) => w.yieldOf(b) - w.yieldOf(a) || b.lv - a.lv);
@@ -382,8 +479,10 @@ function CampView({ w, act }: V) {
         <p className="gr-dim">Camp is set up in {w.reg.icon} <b>{w.reg.name}</b>. Every 15 seconds each camper earns scrap and xp, and has a chance to bring back 🪨 Ore (Dig), 🌱 Kelp (Trawl) or ⚙️ Gears (Skirmish). ⭐ {roleLabel(w.reg.favor)} Greebles work 1.5× better here. Keeps going while you're away (up to {Math.round(w.offlineCap / 3600000)} h).</p>
         {s.camp.map((u, i) => { const g = u ? w.get(u) : undefined; return g
           ? <Row key={i} g={g} w={w} right={<div className="gr-btns col">{jobTag(g)}<button className="gr-btn" onClick={() => act(w.bench(i))}>Bench</button></div>} />
-          : <div key={i} className="gr-row empty">Empty camp spot {i + 1}</div>; })}
+          : null; })}
+        {s.camp.some(u => !u) && <div className="gr-row empty">{s.camp.filter(u => !u).length} empty camp spot{s.camp.filter(u => !u).length > 1 ? 's' : ''}. Send Greebles from your bag below ↓</div>}
       </section>
+      <NestCard w={w} act={act} now={now} />
       <section className="gr-card">
         <h2>Build your camp</h2>
         <p className="gr-dim small">Spend scrap on upgrades that last forever.</p>
@@ -399,7 +498,7 @@ function CampView({ w, act }: V) {
           );
         })}
       </section>
-      <section className="gr-card">
+      <section className="gr-card gr-sendbag">
         <h2>Send from bag</h2>
         {!free.length ? <div className="gr-empty">Catch Greebles in the Wilds, then park them here.</div>
           : free.slice(0, 30).map(g => <Row key={g.u} g={g} w={w} right={<button className="gr-btn g" disabled={full} onClick={() => act(w.assign(g.u))}>Camp</button>} />)}

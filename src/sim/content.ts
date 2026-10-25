@@ -365,6 +365,33 @@ export const HUNTS: Hunt[] = [
 ];
 /** Once a hunt is done, its Mythic waits this long in its area. */
 export const HUNT_SPAWN_MS = 60 * 60 * 1000;
+
+// ── 0.9: nest & eggs ───────────────────────────────────────
+/** Two Greebles of the same family in the nest lay an egg about this often (keeps going while away). */
+export const NEST_MS = 2 * 60 * 60 * 1000;
+/** Eggs wait in the incubator; this many at once. */
+export const EGG_MAX = 3;
+/** How long an egg takes to hatch, by the rarity of what's inside. */
+export const HATCH_MS: Record<Rarity, number> = { common: 60 * 60 * 1000, uncommon: 2 * 60 * 60 * 1000, rare: 4 * 60 * 60 * 1000, epic: 6 * 60 * 60 * 1000, legendary: 0, mythic: 0 };
+/** Eggs are 3× more likely to be Prismatic than a wild Greeble (9× with a Prismatic parent). */
+export const EGG_PRISM_MULT = 3;
+
+// ── 0.9: daily tasks ───────────────────────────────────────
+/** Each day you get 3 of these. `key` is a tally key (see HuntStep); `el` = pick an element you can catch. */
+export interface TaskDef { id: string; key: string; need: number; label: string; el?: boolean }
+export const TASK_POOL: TaskDef[] = [
+  { id: 'catch8', key: 'catch', need: 8, label: 'Catch 8 Greebles' },
+  { id: 'catch15', key: 'catch', need: 15, label: 'Catch 15 Greebles' },
+  { id: 'catchEl', key: 'catch:', need: 4, label: 'Catch 4 {el} Greebles', el: true },
+  { id: 'perfect', key: 'perfect', need: 3, label: 'Land 3 Perfect throws' },
+  { id: 'nice', key: 'goodThrow', need: 6, label: 'Land 6 Nice (or better) throws' },
+  { id: 'patrol', key: 'patrol', need: 5, label: 'Break 5 patrol robots' },
+  { id: 'craft', key: 'craft', need: 2, label: 'Make 2 things at the Workbench' },
+  { id: 'graft', key: 'graft', need: 2, label: 'Graft 2 Greebles' },
+  { id: 'evolve', key: 'evolve', need: 1, label: 'Evolve a Greeble' },
+  { id: 'hatch', key: 'hatch', need: 1, label: 'Hatch an egg' },
+];
+export const DAILY_COUNT = 3;
 export const EXPEDITION_MS = 4 * 60 * 60 * 1000;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const WEEK_MS = 7 * DAY_MS;
@@ -390,6 +417,8 @@ export const FAMILIES: Morph[][] = SPAWNABLE.map(root => {
 const rootOf = new Map<string, string>();
 for (const fam of FAMILIES) for (const m of fam) rootOf.set(m.id, fam[0].id);
 export const elementOf = (id: string): Element => EL_OVERRIDE[id] ?? FAMILY_EL[rootOf.get(id) ?? id] ?? 'ash';
+/** The stage-1 kind a Greeble's family starts from (what hatches from its egg). */
+export const familyRoot = (id: string) => rootOf.get(id) ?? id;
 export const roleLabel = (r: Role) => (r === 'mine' ? 'Dig' : r === 'fish' ? 'Trawl' : 'Skirmish');
 const ROLES: Role[] = ['mine', 'fish', 'fight'];
 

@@ -244,7 +244,7 @@ describe('saves', () => {
     const old = { scrap: 120, bag: [{ u: 'g1', sp: 'draug', lv: 12, xp: 5 }, { u: 'g2', sp: 'nulith', lv: 3, xp: 0 }, { u: 'g3', sp: 'gone', lv: 1 }],
       camp: ['g2', null, null, null], huntAt: 0, campCarry: 0, fight: null, seen: { draug: true }, stats: { caught: 2 }, lastSeen: T0, tips: { walk: true } };
     const s = migrate(old, T0);
-    expect(s.version).toBe(7);
+    expect(s.version).toBe(8);
     expect(s.region).toBe('ash'); expect(s.unlocked).toBe(1);
     expect(s.bag.map(g => g.sp)).toEqual(['draug', 'nulith']);
     expect(s.bag[0].stars).toBe(3);
@@ -581,6 +581,90 @@ describe('0.8: Mythic Hunts + Void Rift', () => {
     expect(w.tallyOf('patrol')).toBe(12); expect(w.s.hunts['h_tide']).toBe(T0);
     const old: any = JSON.parse(JSON.stringify(w.s)); delete old.tally; delete old.hunts; old.version = 6;
     const m = migrate(old, T0);
-    expect(m.tally).toEqual({}); expect(m.hunts).toEqual({}); expect(m.version).toBe(7);
+    expect(m.tally).toEqual({}); expect(m.hunts).toEqual({}); expect(m.version).toBe(8);
   });
 });
+
+
+describe('0.9: nest, eggs, daily tasks, intro', () => {
+  const add = (w: World, sp: string, extra: Partial<{ stars: number; prism: boolean; lv: number }> = {}) => {
+    const g = { u: 'g' + w.s.nextId++, sp, lv: extra.lv ?? 5, xp: 0, stars: extra.stars ?? 3, prism: extra.prism ?? false };
+    w.s.bag.push(g); return g.u;
+  };
+  it('two of the same family lay an egg every 2h, of the stage-1 kind', () => {
+    const w = fresh(21);
+    const a = add(w, 'ashpup'), b = add(w, 'gleckor');
+    expect(w.toNest(a).ok).toBe(true); expect(w.toNest(b).ok).toBe(true);
+    expect(w.nestWhy()).toBe('');
+    w.advance(2 * HOUR + 1000, T0);
+    expect(w.s.eggs.length).toBe(1); expect(w.s.eggs[0].sp).toBe('ashpup');
+    expect(w.drain().some(e => e.t === 'eggLaid')).toBe(true);
+  });
+  it('different families, legendaries and busy Greebles cannot nest', () => {
+    const w = fresh(22);
+    const a = add(w, 'ashpup'), b = add(w, 'tidling'), l = add(w, 'quorvex');
+    w.toNest(a); w.toNest(b);
+    expect(w.nestWhy()).toMatch(/same family/);
+    w.advance(5 * HOUR, T0); expect(w.s.eggs.length).toBe(0);
+    expect(w.toNest(l).ok).toBe(false);
+    // nesting Greebles can't camp or fight
+    expect(w.assign(a).ok).toBe(false);
+    expect(w.startFight(a, 'drone').ok).toBe(false);
+  });
+  it('the incubator holds 3 eggs; eggs hatch over time and catching warms them', () => {
+    const w = fresh(23);
+    w.toNest(add(w, 'tidling')); w.toNest(add(w, 'nulith'));
+    w.advance(20 * HOUR, T0);
+    expect(w.s.eggs.length).toBe(3);
+    // all common eggs (1h) laid long ago are ready
+    const e0 = w.s.eggs[0];
+    expect(e0.left).toBe(0);
+    const bag = w.s.bag.length;
+    expect(w.hatch(e0.id).ok).toBe(true);
+    expect(w.s.bag.length).toBe(bag + 1);
+    const baby = w.s.bag[w.s.bag.length - 1];
+    expect(baby.sp).toBe('tidling'); expect(baby.lv).toBe(1);
+    expect(w.tallyOf('hatch')).toBe(1);
+    // a fresh egg isn't ready, but catching warms it
+    w.s.eggs = [{ id: 'e1', sp: 'zoln', prism: false, stars: 2, left: 30 * MIN, total: 4 * HOUR }];
+    expect(w.hatch('e1').ok).toBe(false);
+    const sp = w.addSpawn(T0, 'wild', 'ashpup'); w.startEncounter(sp.id); w.s.items.star = 1; w.throwSnare('star', 0);
+    expect(w.s.eggs[0].left).toBe(20 * MIN);
+  });
+  it('eggs are Prismatic more often than wild Greebles, much more with a Prismatic parent', () => {
+    const count = (prism: boolean) => {
+      const w = fresh(31); let p = 0; const N = 6000;
+      w.toNest(add(w, 'ashpup', { prism })); w.toNest(add(w, 'gleck'));
+      for (let i = 0; i < N; i++) { w.s.eggs = []; w.s.nestCarry = 2 * HOUR; w.advance(1, T0); if (w.s.eggs[0]?.prism) p++; }
+      return p / N;
+    };
+    const plain = count(false), withPrism = count(true);
+    expect(plain).toBeGreaterThan(1 / 400); expect(withPrism).toBeGreaterThan(plain * 2);
+  });
+  it('daily tasks: 3 per day, progress from tallies, claim pays once, all 3 = bonus', () => {
+    const w = fresh(41);
+    const d = w.ensureDaily(T0);
+    expect(d.tasks.length).toBe(3);
+    expect(new Set(d.tasks.map(t => t.id)).size).toBe(3);
+    expect(w.ensureDaily(T0 + HOUR)).toBe(d);
+    expect(w.claimTask(0, T0).ok).toBe(false);
+    for (const t of d.tasks) w.s.tally[t.key] = (w.s.tally[t.key] ?? 0) + t.need;
+    const scrap = w.s.scrap, great = w.count('great');
+    for (let i = 0; i < 3; i++) expect(w.claimTask(i, T0).ok).toBe(true);
+    expect(w.claimTask(0, T0).ok).toBe(false);
+    expect(w.s.scrap).toBe(scrap + 3 * w.taskScrap);
+    expect(w.count('great')).toBe(great + 2); expect(d.bonus).toBe(true);
+    // a new day = new tasks, starting from 0
+    const d2 = w.ensureDaily(T0 + 24 * HOUR);
+    expect(d2).not.toBe(d); for (const t of d2.tasks) expect(w.taskProgress(t)).toBe(0);
+  });
+  it('new games start the intro; old saves skip it; nest/eggs migrate', () => {
+    expect(newGame(1, T0).intro).toBe(0);
+    const old: any = JSON.parse(JSON.stringify(newGame(2, T0)));
+    delete old.intro; delete old.nest; delete old.eggs; delete old.daily; old.version = 7;
+    old.bag.push({ u: 'g99', sp: 'ashpup', lv: 3, xp: 0, stars: 2, prism: false });
+    const m = migrate(old, T0);
+    expect(m.intro).toBe(99); expect(m.nest).toEqual([null, null]); expect(m.eggs).toEqual([]); expect(m.daily).toBeNull();
+  });
+});
+

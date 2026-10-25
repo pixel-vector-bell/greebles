@@ -273,3 +273,80 @@ button:disabled { cursor: default; opacity: .45; }
 .gr-steps > div { display: flex; justify-content: space-between; gap: 8px; color: #b8c2d0; }
 .gr-steps > div.done { color: #7ad08a; }
 .gr-steps b { font-variant-numeric: tabular-nums; }
+
+/* 0.9: painted area backgrounds */
+.gr-wilds { background-size: cover !important; background-position: center 60% !important; }
+.gr-wilds-shade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(rgba(10,14,24,.15), rgba(10,14,24,.05) 40%, rgba(10,14,24,.35)); z-index: 1; transition: background .6s; }
+.gr-wilds.night .gr-wilds-shade { background: linear-gradient(rgba(6,8,30,.62), rgba(10,12,40,.55)); }
+.gr-wilds.night.reg-tide, .gr-wilds.night.reg-rust, .gr-wilds.night.reg-glass { filter: none; }
+.gr-wilds.storm .gr-wilds-shade { background: linear-gradient(rgba(20,26,40,.55), rgba(20,26,40,.4)); }
+.gr-wilds-count, .gr-wilds-empty { z-index: 3; }
+.gr-wilds-empty { text-shadow: 0 1px 3px #000; color: #e8ecf2; }
+.gr-spawn .gr-badge.art img { filter: drop-shadow(0 4px 3px rgba(0,0,0,.55)); }
+.gr-spawn:active { transform: translate(-50%, -50%) scale(.92); }
+
+/* 0.9: evolve / hatch flash */
+.gr-evo, .gr-hatch { position: relative; overflow: hidden; }
+.gr-evo-flash { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 45%, #fff 0, rgba(255,240,180,.8) 25%, transparent 60%); animation: gr-flash 1.1s ease-out forwards; z-index: 5; }
+@keyframes gr-flash { 0% { opacity: 0; } 20% { opacity: 1; } 100% { opacity: 0; } }
+.gr-evo-from { animation: gr-evo-shake .5s ease-in-out 2; }
+@keyframes gr-evo-shake { 25% { transform: translateX(-3px) rotate(-4deg); } 75% { transform: translateX(3px) rotate(4deg); } }
+.gr-evo-to { animation: gr-pop 1s ease-out; }
+
+/* 0.9: daily tasks */
+.gr-daily h2 { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.gr-task { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #263140; }
+.gr-task b { font-size: 13px; }
+.gr-task.done { opacity: .6; }
+.gr-bar.thin { height: 5px; margin-top: 4px; }
+
+/* 0.9: nest & eggs */
+.gr-nest-row { display: flex; gap: 10px; align-items: center; margin: 8px 0; }
+.gr-nest-spot { width: 92px; min-height: 120px; background: #161e29; border: 1px dashed #3a4a5e; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px; text-align: center; font-size: 11px; }
+.gr-nest-empty { background: none; border: 0; color: var(--dim); font-size: 26px; display: flex; flex-direction: column; align-items: center; }
+.gr-nest-empty small { font-size: 11px; }
+.gr-nest-status { flex: 1; }
+.gr-sub-h { font-size: 13px; margin: 10px 0 6px; color: var(--dim); }
+.gr-eggs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.gr-egg { background: #161e29; border-radius: 12px; padding: 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; font-size: 11px; }
+.gr-egg .gr-bar { width: 100%; }
+.gr-egg-shell { width: 52px; height: 62px; border-radius: 50% 50% 46% 46% / 58% 58% 42% 42%; background: radial-gradient(circle at 35% 30%, #fff 0, color-mix(in srgb, var(--egg) 45%, #fff) 30%, var(--egg) 100%); display: grid; place-items: center; box-shadow: inset -4px -6px 10px rgba(0,0,0,.25); }
+.gr-egg-shell span { display: none; }
+.gr-egg.ready .gr-egg-shell { animation: gr-egg-wiggle 1s ease-in-out infinite; box-shadow: 0 0 14px #ffd23c, inset -4px -6px 10px rgba(0,0,0,.25); }
+@keyframes gr-egg-wiggle { 0%, 60%, 100% { transform: rotate(0); } 70% { transform: rotate(-9deg); } 80% { transform: rotate(9deg); } 90% { transform: rotate(-5deg); } }
+
+/* 0.9: intro */
+.gr-intro { position: fixed; left: 0; right: 0; z-index: 900; display: flex; justify-content: center; pointer-events: none; padding: 0 10px; }
+.gr-intro.modal { inset: 0; align-items: center; background: rgba(5,8,14,.72); pointer-events: auto; }
+.gr-intro.coach { bottom: 74px; }
+.gr-intro.coach.top { bottom: auto; top: 8px; }
+.gr-intro.coach .gr-intro-card { padding: 10px 14px; }
+.gr-intro.coach .gr-intro-card p { font-size: 13px; margin-bottom: 6px; }
+.gr-intro-card { pointer-events: auto; max-width: 420px; width: 100%; background: linear-gradient(#1f2a3a, #172030); border: 2px solid #ffd23c; border-radius: 16px; padding: 14px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.6); }
+.gr-intro-card h2 { margin: 2px 0 6px; color: #ffd23c; }
+.gr-intro-card p { margin: 0 0 10px; line-height: 1.4; }
+.gr-intro-step { font-size: 11px; color: var(--dim); }
+.gr-intro-btns { display: flex; align-items: center; gap: 10px; }
+.gr-intro-btns .gr-btn-big { flex: 1; margin: 0; }
+.gr-intro-skip { background: none; border: 0; color: var(--dim); font-size: 12px; text-decoration: underline; }
+@keyframes gr-intro-pulse { 50% { outline-color: rgba(255,210,60,.35); } }
+
+/* 0.9 polish: 5 areas fit one row; name pills pop on painted backgrounds; tide/glass a bit dimmer so Greebles stand out */
+.gr-regions { grid-template-columns: repeat(5, 1fr) !important; gap: 4px !important; }
+.gr-region { padding: 5px 1px !important; }
+.gr-region small { font-size: 9.5px !important; }
+.gr-spawn small { background: rgba(8,10,18,.85) !important; border: 1px solid rgba(255,255,255,.18); font-weight: 600; }
+.gr-wilds.reg-tide .gr-wilds-shade, .gr-wilds.reg-glass .gr-wilds-shade { background: linear-gradient(rgba(10,14,24,.3), rgba(10,14,24,.22) 40%, rgba(10,14,24,.42)); }
+.gr-wilds.reg-void .gr-wilds-shade { background: linear-gradient(rgba(20,10,40,.35), rgba(20,10,40,.25)); }
+.gr-sendbag, .gr-daily { scroll-margin-top: 140px; }
+
+.gr-toast { z-index: 40 !important; bottom: calc(84px + var(--safe-b)) !important; box-shadow: 0 6px 18px rgba(0,0,0,.55); }
+
+/* 0.9: Aphrodite's review */
+.gr-spawn small { font-size: 12px !important; padding: 2px 8px !important; margin-top: 4px; }
+.gr-spawn small.unk { color: #8a93b0; font-weight: 500; }
+:root { --card: #202a3e; }
+.gr-nest-spot, .gr-egg, .gr-robot { background: #2a3654 !important; border-color: #3a4670 !important; }
+.gr-tabs button { color: #a6aec8; }
+.gr-toast { top: calc(96px + var(--safe-t, 0px)) !important; bottom: auto !important; }
+.gr-task .gr-bar > div { transition: none; }

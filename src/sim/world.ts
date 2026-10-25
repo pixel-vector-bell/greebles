@@ -4,13 +4,13 @@ import {
   craterAt, hash32, hasMorph, isNight, morph, robot, stormAt, xpNeed,
   REGIONS, BOSS_REMATCH_MS, TEAM_MAX, UPGRADES, PRESS_MS_PER_SNARE, region, regionIndex, robotIn,
   JOB, FAVOR_MULT, LURES, LURE_MS, LURE_SPAWN_MIN, LURE_SPAWN_MAX, type LureId,
-  HUNTS, HUNT_SPAWN_MS, type Hunt, SHIP_PARTS, PERKS, perkCost, SIGNAL_STEP, EXPEDITION_MS, DAY_MS, WEEK_MS, SWARM_MULT, type PartId, type PerkId,
+  HUNTS, HUNT_SPAWN_MS, type Hunt, NEST_MS, EGG_MAX, HATCH_MS, EGG_PRISM_MULT, TASK_POOL, DAILY_COUNT, ELEMENTS, familyRoot, SHIP_PARTS, PERKS, perkCost, SIGNAL_STEP, EXPEDITION_MS, DAY_MS, WEEK_MS, SWARM_MULT, type PartId, type PerkId,
   RECIPES, MOVE_AUTO, MOVE_AUTO_MULT, MOVE_CHARGE, MOVE_TAP_MULT, elementOf, typeMult, type Element,
   type Evo, type ItemId, type Morph, type Rarity, type RegionId, type Role, type SnareId, type UpgradeId,
 } from './content';
 import { nextRandom } from './rng';
 
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 
 export interface Greeble { u: string; sp: string; lv: number; xp: number; stars: number; prism: boolean; caughtAt?: number }
 export type SpawnSrc = 'wild' | 'crater' | 'beacon' | 'wreck' | 'mythic' | 'legend' | 'lure';
@@ -20,6 +20,8 @@ export type FightKind = 'patrol' | 'wreck' | 'boss';
 export interface Fighter { u: string; hp: number; maxHp: number; charge: number; boost: boolean }
 export interface Fight { team: Fighter[]; robot: string; robotHp: number; robotMax: number; carry: number; kind: FightKind; reg: RegionId; /** convenience: first fighter */ u: string }
 export interface Wreck { robot: string; until: number }
+export interface Egg { id: string; sp: string; prism: boolean; stars: number; left: number; total: number }
+export interface DailyTask { id: string; key: string; need: number; label: string; base: number; done: boolean }
 
 export interface Stats {
   caught: number; thrown: number; fled: number; prisms: number; sold: number; grafts: number; evolved: number;
@@ -72,6 +74,14 @@ export interface GameState {
   tally: Record<string, number>;
   /** 0.8: hunts finished (time the Mythic was first called) and Mythics caught from them. */
   hunts: Record<string, number>;
+  /** 0.9: two Greebles of one family in the nest lay eggs; eggs hatch over time. */
+  nest: [string | null, string | null];
+  nestCarry: number;
+  eggs: Egg[];
+  /** 0.9: three small goals a day (progress = tally now − tally at the start of the day). */
+  daily: { day: number; tasks: DailyTask[]; bonus: boolean } | null;
+  /** 0.9: new-player walkthrough step (99 = done). */
+  intro: number;
   /** Materials brought back by campers (for the welcome-back card / stats). */
   gathered: Partial<Record<ItemId, number>>;
   /** Kinds met in the wilds (or owned). */
@@ -96,6 +106,7 @@ export function newGame(seed = (Math.random() * 2 ** 31) | 0, now = Date.now()):
     wreck: null, nextWreckAt: now + RULES.wreckFirstMs, enc: null,
     region: 'ash', unlocked: 1, bossBeaten: {}, upgrades: {}, pressCarry: 0, lure: null, gathered: {},
     ship: {}, signals: 0, sp: 0, perks: {}, expo: null, expoDay: 0, bestEver: { caught: 0, bosses: 0 }, tally: {}, hunts: {},
+    nest: [null, null], nestCarry: 0, eggs: [], daily: null, intro: 0,
     seen: {}, caught: {}, prismCaught: {}, claimed: {}, stats: freshStats(), lastSeen: now, tips: {},
   };
   // A few Greebles are already out there on day one.
@@ -130,7 +141,12 @@ export type GameEvent =
   | { t: 'reward'; id: string; label: string }
   | { t: 'beacon' }
   | { t: 'huntDone'; id: string; mythic: string }
-  | { t: 'huntCall'; id: string; mythic: string };
+  | { t: 'huntCall'; id: string; mythic: string }
+  | { t: 'eggLaid'; sp: string }
+  | { t: 'eggReady'; sp: string }
+  | { t: 'hatched'; sp: string; prism: boolean; stars: number }
+  | { t: 'task'; label: string }
+  | { t: 'taskBonus' };
 
 export type ActionResult = { ok: true } | { ok: false; why: string };
 const fail = (why: string): ActionResult => ({ ok: false, why });
@@ -149,6 +165,99 @@ export class World {
   private rand() { return nextRandom(this.s); }
   private between(a: number, b: number) { return a + this.rand() * (b - a); }
   private uid(prefix: string) { return `${prefix}${this.s.nextId++}`; }
+
+  // ── 0.9: nest & eggs ──────────────────────────────────────
+  /** Why the nest can't lay right now ('' = it's laying). */
+  nestWhy(): string {
+    const [a, b] = this.s.nest.map(u => (u ? this.get(u) : undefined));
+    if (!a || !b) return 'Put two Greebles from the same family in the nest.';
+    if (familyRoot(a.sp) !== familyRoot(b.sp)) return 'They need to be from the same family (like Ash Pup + Hulking Ash).';
+    if (this.s.eggs.length >= EGG_MAX) return `The incubator is full (${EGG_MAX} eggs). Hatch one first.`;
+    return '';
+  }
+  canNest(g: Greeble): string {
+    const m = morph(g.sp);
+    if (m.rarity === 'legendary' || m.rarity === 'mythic') return `${m.name} is too rare to nest.`;
+    return '';
+  }
+  toNest(u: string, slot?: 0 | 1): ActionResult {
+    const g = this.get(u); if (!g) return fail('Not in the bag.');
+    const why = this.canNest(g); if (why) return fail(why);
+    if (this.inNest(u)) return OK;
+    if (this.inCamp(u) || this.fighting(u) || this.s.expo?.u === u) return fail('It is busy. Bench it first.');
+    const i = slot ?? (this.s.nest[0] ? 1 : 0);
+    if (this.s.nest[i]) return fail('That nest spot is taken.');
+    this.s.nest[i] = u;
+    this.s.nestCarry = 0;
+    return OK;
+  }
+  fromNest(slot: 0 | 1): ActionResult { this.s.nest[slot] = null; this.s.nestCarry = 0; return OK; }
+  /** ms until the next egg (or null if the nest isn't laying). */
+  get nextEggIn() { return this.nestWhy() ? null : Math.max(0, NEST_MS - this.s.nestCarry); }
+  private layEgg() {
+    const [a, b] = this.s.nest.map(u => this.get(u!)!) as [Greeble, Greeble];
+    const root = morph(familyRoot(a.sp));
+    let stars = Math.max(this.rollStars(), this.rollStars());
+    if (a.stars + b.stars >= 8 && this.rand() < 0.35) stars++;
+    const prismMult = EGG_PRISM_MULT * (a.prism || b.prism ? 3 : 1) * (1 + this.perk('shine') * 0.25);
+    const ms = HATCH_MS[root.rarity] || HATCH_MS.common;
+    this.s.eggs.push({ id: this.uid('e'), sp: root.id, prism: this.rand() < RULES.prismOdds * prismMult, stars: Math.min(5, stars), left: ms, total: ms });
+    this.emit({ t: 'eggLaid', sp: root.id });
+  }
+  /** Catching Greebles warms your eggs: each catch takes 10 minutes off every egg. */
+  private warmEggs(ms: number) {
+    for (const e of this.s.eggs) if (e.left > 0) { e.left = Math.max(0, e.left - ms); if (e.left === 0) this.emit({ t: 'eggReady', sp: e.sp }); }
+  }
+  hatch(id: string): ActionResult {
+    const i = this.s.eggs.findIndex(e => e.id === id); if (i < 0) return fail('No such egg.');
+    const e = this.s.eggs[i];
+    if (e.left > 0) return fail('It is not ready yet.');
+    if (this.s.bag.length >= this.s.bagMax) return fail('Your bag is full.');
+    this.s.eggs.splice(i, 1);
+    this.s.bag.push({ u: this.uid('g'), sp: e.sp, lv: 1, xp: 0, stars: e.stars, prism: e.prism, caughtAt: Date.now() });
+    this.s.caught[e.sp] = true; this.s.seen[e.sp] = true;
+    if (e.prism) { this.s.prismCaught[e.sp] = true; this.s.stats.prisms++; this.tick('prism'); }
+    this.tick('hatch');
+    this.emit({ t: 'hatched', sp: e.sp, prism: e.prism, stars: e.stars });
+    this.checkRewards(); this.checkHunts(Date.now());
+    return OK;
+  }
+
+  // ── 0.9: daily tasks ──────────────────────────────────────
+  /** Make sure today's tasks exist (a new set every day). */
+  ensureDaily(now: number) {
+    const day = Math.floor(now / DAY_MS);
+    if (this.s.daily?.day === day) return this.s.daily;
+    // elements you can actually find right now
+    const els = [...new Set(REGIONS.filter(r => this.isOpen(r.id)).flatMap(r => r.kinds).map(k => elementOf(k)))];
+    const pool = TASK_POOL.filter(t => !(t.id === 'catch15' && this.s.stats.caught < 20));
+    const picked: DailyTask[] = [];
+    const used = new Set<string>();
+    while (picked.length < DAILY_COUNT && used.size < pool.length) {
+      const d = pool[Math.floor(this.rand() * pool.length)];
+      if (used.has(d.id) || (d.id.startsWith('catch') && picked.some(p => p.id.startsWith('catch')))) { used.add(d.id); continue; }
+      used.add(d.id);
+      let key = d.key, label = d.label;
+      if (d.el) { const el = els[Math.floor(this.rand() * els.length)] ?? 'ash'; key = `catch:${el}`; label = label.replace('{el}', ELEMENTS[el].name); }
+      picked.push({ id: d.id, key, need: d.need, label, base: this.tallyOf(key), done: false });
+    }
+    this.s.daily = { day, tasks: picked, bonus: false };
+    return this.s.daily;
+  }
+  taskProgress(t: DailyTask) { return Math.min(t.need, this.tallyOf(t.key) - t.base); }
+  /** Scrap for one daily task (grows with how far you've gone). */
+  get taskScrap() { return Math.round(60 * this.s.unlocked * this.hard); }
+  claimTask(i: number, now: number): ActionResult {
+    const d = this.ensureDaily(now); const t = d.tasks[i];
+    if (!t) return fail('No such task.');
+    if (t.done) return fail('Already claimed.');
+    if (this.taskProgress(t) < t.need) return fail('Not done yet.');
+    t.done = true;
+    this.earn(this.taskScrap); this.give('good', 3);
+    this.emit({ t: 'task', label: t.label });
+    if (!d.bonus && d.tasks.every(x => x.done)) { d.bonus = true; this.give('great', 2); this.give('lureRare', 1); this.emit({ t: 'taskBonus' }); }
+    return OK;
+  }
 
   // ── 0.8: Mythic Hunts ─────────────────────────────────────
   tick(key: string, n = 1) { this.s.tally[key] = (this.s.tally[key] ?? 0) + n; }
@@ -187,7 +296,8 @@ export class World {
   get(u: string) { return this.s.bag.find(g => g.u === u); }
   spawn(id: string) { return this.s.spawns.find(x => x.id === id); }
   inCamp(u: string) { return this.s.camp.includes(u); }
-  busy(u: string) { return this.inCamp(u) || this.fighting(u) || this.s.expo?.u === u; }
+  busy(u: string) { return this.inCamp(u) || this.fighting(u) || this.s.expo?.u === u || this.inNest(u); }
+  inNest(u: string) { return this.s.nest.includes(u); }
   perk(id: PerkId) { return this.s.perks[id] ?? 0; }
   /** Robots get tougher each time you signal home (and pay more). */
   get hard() { return 1 + this.s.signals * SIGNAL_STEP; }
@@ -424,7 +534,7 @@ export class World {
       stats: { ...old.stats }, tips: old.tips,
       signals: old.signals + 1, sp: old.sp + this.signalReward, perks: old.perks,
       bestEver: { caught: Math.max(old.bestEver.caught, old.stats.caught), bosses: Math.max(old.bestEver.bosses, old.stats.bosses) },
-      expoDay: old.expoDay, tally: old.tally, hunts: old.hunts,
+      expoDay: old.expoDay, tally: old.tally, hunts: old.hunts, intro: 99, daily: old.daily,
     };
     s.items = { ...s.items, good: (s.items.good ?? 0) + pack * 5, great: (s.items.great ?? 0) + pack * 2 };
     // the Field Guide rewards you already claimed stay claimed, but the bag/camp they gave come back too
@@ -512,7 +622,8 @@ export class World {
     const chance = this.catchChance(snare, q);
     s.items[snare] = this.count(snare) - 1;
     s.stats.thrown++; e.throws++;
-    if (q === 3) s.stats.perfects++;
+    if (q === 3) { s.stats.perfects++; this.tick('perfect'); }
+    if (q >= 1) this.tick('goodThrow');
     e.treat = false;
     const m = morph(x.sp);
     if (this.rand() < chance) {
@@ -522,7 +633,7 @@ export class World {
       if (x.prism) { s.prismCaught[x.sp] = true; s.stats.prisms++; this.tick('prism'); }
       s.stats.caught++;
       this.tick('catch'); this.tick(`catch:${elementOf(x.sp)}`); if (isNight(Date.now())) this.tick('night');
-      if (q === 3) this.tick('perfect');
+      this.warmEggs(10 * 60_000);
       const scrap = (3 + RARITIES.indexOf(m.rarity) * 6) * (first ? 3 : 1) + q * 2;
       this.earn(scrap);
       s.spawns = s.spawns.filter(y => y.id !== x.id);
@@ -570,6 +681,7 @@ export class World {
     if (this.fighting(u)) return fail('It is fighting right now.');
     const scrap = this.sellValue(g);
     this.s.camp = this.s.camp.map(x => (x === u ? null : x));
+    this.s.nest = this.s.nest.map(x => (x === u ? null : x)) as [string | null, string | null];
     this.s.bag = this.s.bag.filter(x => x.u !== u);
     this.earn(scrap);
     this.s.stats.sold++;
@@ -587,7 +699,7 @@ export class World {
     if (other.stars > g.stars) g.stars = other.stars;
     else if (g.stars < 5 && this.rand() < (other.stars === g.stars ? 0.35 : 0.12)) g.stars++;
     if (other.prism && !g.prism) g.prism = true; // feeding a Prismatic in passes the shine on
-    this.s.stats.grafts++;
+    this.s.stats.grafts++; this.tick('graft');
     this.addXp(g, 40 + other.lv * 15);
     this.emit({ t: 'grafted', sp: g.sp, lv: g.lv, stars: g.stars, starUp: g.stars > before });
     return OK;
@@ -613,6 +725,7 @@ export class World {
   assign(u: string, slot?: number): ActionResult {
     if (!this.get(u)) return fail('Not in the bag.');
     if (this.fighting(u)) return fail('It is fighting right now.');
+    if (this.inNest(u)) return fail('It is in the nest. Take it out first.');
     const i = slot ?? this.s.camp.findIndex(x => !x);
     if (i < 0 || i >= this.s.camp.length) return fail('Camp is full.');
     this.s.camp = this.s.camp.map(x => (x === u ? null : x));
@@ -645,6 +758,7 @@ export class World {
     const team = ids.map(u => this.get(u)).filter(Boolean) as Greeble[];
     if (!team.length) return 'Pick a Greeble.';
     if (team.some(g => this.inCamp(g.u))) return 'Bench them from camp first.';
+    if (team.some(g => this.inNest(g.u))) return 'Take them out of the nest first.';
     return team;
   }
   /** Simulate a fight on copies (moves fire on their own): would this team win? */
@@ -832,6 +946,19 @@ export class World {
     if (!(ms > 0)) return;
     this.s.campCarry += ms;
     while (this.s.campCarry >= RULES.campTickMs) { this.s.campCarry -= RULES.campTickMs; this.campPayout(); }
+    this.warmEggs(ms);
+    if (!this.nestWhy()) {
+      // eggs laid part-way through this step have been warming since they were laid (matters for long offline catch-ups)
+      let at = NEST_MS - this.s.nestCarry;   // ms into this step when the next egg drops
+      this.s.nestCarry += ms;
+      while (this.s.nestCarry >= NEST_MS && !this.nestWhy()) {
+        this.s.nestCarry -= NEST_MS; this.layEgg();
+        const egg = this.s.eggs[this.s.eggs.length - 1];
+        egg.left = Math.max(0, egg.left - Math.max(0, ms - at));
+        at += NEST_MS;
+      }
+      if (this.nestWhy()) this.s.nestCarry = 0;
+    }
     const press = this.up('press');
     if (press) {
       this.s.pressCarry += ms * press;
@@ -846,16 +973,18 @@ export class World {
   }
 
   /** Offline catch-up: camp (capped) + the wilds. Returns what happened for the welcome-back card. */
-  catchUp(ms: number, now = Date.now()): { ms: number; scrap: number; levels: number; waiting: number; got: Partial<Record<ItemId, number>> } {
+  catchUp(ms: number, now = Date.now()): { ms: number; scrap: number; levels: number; waiting: number; got: Partial<Record<ItemId, number>>; eggs: number } {
     const capped = Math.min(Math.max(0, ms), this.offlineCap);
     const before = this.s.scrap;
     const g0 = { ...this.s.gathered };
     this.advance(capped, now);
     this.updateWilds(now);
-    const levels = this.drain().filter(e => e.t === 'level').length;
+    const evs = this.drain();
+    const levels = evs.filter(e => e.t === 'level').length;
+    const eggs = evs.filter(e => e.t === 'eggLaid').length;
     const got: Partial<Record<ItemId, number>> = {};
     for (const [k, v] of Object.entries(this.s.gathered) as [ItemId, number][]) { const d = v - (g0[k] ?? 0); if (d > 0) got[k] = d; }
-    return { ms: capped, scrap: this.s.scrap - before, levels, waiting: this.here.length, got };
+    return { ms: capped, scrap: this.s.scrap - before, levels, waiting: this.here.length, got, eggs };
   }
 }
 
@@ -929,6 +1058,16 @@ export function migrate(raw: any, now = Date.now()): GameState {
     expo: raw.expo && ids.has(raw.expo.u) && regIds.includes(raw.expo.reg) ? { u: raw.expo.u, until: num(raw.expo.until, 0), reg: raw.expo.reg } : null,
     expoDay: Math.max(0, num(raw.expoDay, 0) | 0),
     bestEver: { caught: Math.max(0, num(raw.bestEver?.caught, 0)), bosses: Math.max(0, num(raw.bestEver?.bosses, 0)) },
+    nest: (() => { const n = Array.isArray(raw.nest) ? raw.nest : []; const a = typeof n[0] === 'string' && ids.has(n[0]) && !camp.includes(n[0]) ? n[0] : null; const b = typeof n[1] === 'string' && ids.has(n[1]) && n[1] !== a && !camp.includes(n[1]) ? n[1] : null; return [a, b] as [string | null, string | null]; })(),
+    nestCarry: Math.max(0, num(raw.nestCarry, 0)),
+    eggs: Array.isArray(raw.eggs) ? raw.eggs.filter((e: any) => e && typeof e.id === 'string' && hasMorph(e.sp)).slice(0, EGG_MAX)
+      .map((e: any) => ({ id: e.id, sp: e.sp, prism: e.prism === true, stars: Math.min(5, Math.max(1, num(e.stars, 1) | 0)), left: Math.max(0, num(e.left, 0)), total: Math.max(1, num(e.total, 1)) })) : [],
+    daily: raw.daily && typeof raw.daily.day === 'number' && Array.isArray(raw.daily.tasks)
+      ? { day: raw.daily.day, bonus: raw.daily.bonus === true, tasks: raw.daily.tasks.filter((t: any) => t && typeof t.key === 'string').slice(0, DAILY_COUNT)
+          .map((t: any) => ({ id: String(t.id), key: t.key, need: Math.max(1, num(t.need, 1) | 0), label: String(t.label ?? ''), base: num(t.base, 0), done: t.done === true })) }
+      : null,
+    // anyone who already played skips the walkthrough
+    intro: typeof raw.intro === 'number' ? raw.intro : (bag.length > 0 || num(raw.stats?.caught, 0) > 0 ? 99 : 0),
     tally: Object.fromEntries(Object.entries(raw.tally ?? {}).filter(([k, v]) => typeof k === 'string' && typeof v === 'number' && isFinite(v) && v >= 0).slice(0, 200)) as Record<string, number>,
     hunts: Object.fromEntries(Object.entries(raw.hunts ?? {}).filter(([k, v]) => HUNTS.some(h => h.id === k) && typeof v === 'number' && v > 0)) as Record<string, number>,
     gathered: Object.fromEntries(Object.entries(raw.gathered ?? {}).filter(([k, v]) => k in ITEMS && typeof v === 'number' && v >= 0)) as Partial<Record<ItemId, number>>,
