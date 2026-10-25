@@ -220,3 +220,19 @@ button:disabled { cursor: default; opacity: .45; }
 .gr-btn-big.risky { background: #8a3a2a; }
 .gr-row.down { opacity: .4; }
 .gr-boss-win { border-color: var(--gold); }
+
+/* ── 0.4: elements, moves, workbench ─────────────────────── */
+.gr-el { display: inline-flex; align-items: center; gap: 2px; border: 1px solid; border-radius: 999px; padding: 0 5px; font-size: 10px; line-height: 15px; font-weight: 700; background: rgba(0,0,0,.25); white-space: nowrap; vertical-align: middle; margin: 0 1px; }
+.gr-bad { color: var(--bad); }
+.gr-charge { height: 4px; background: #0f151d; border-radius: 2px; margin-top: 3px; overflow: hidden; }
+.gr-charge > div { height: 100%; background: #6a8cff; transition: width .3s; }
+.gr-charge > div.ready { background: var(--gold); }
+.gr-move { flex: none; width: 70px; min-height: 52px; border-radius: 12px; border: 1px solid var(--line); background: #1f2a38; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 20px; }
+.gr-move small { font-size: 9px; line-height: 1.1; text-align: center; color: #aab6c6; white-space: nowrap; }
+.gr-move { width: 78px; }
+.gr-move.ready { border-color: var(--gold); background: #3a3218; box-shadow: 0 0 12px rgba(224,195,106,.6); animation: gr-glow 1s ease-in-out infinite; }
+.gr-move.ready small { color: var(--gold); }
+.gr-move.armed { border-color: var(--ok); background: #1e3424; }
+.gr-move.armed small { color: var(--ok); }
+@keyframes gr-glow { 50% { box-shadow: 0 0 2px rgba(224,195,106,.2); } }
+.gr-chart { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; font-size: 12px; }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { World, Spawn } from '../sim/world';
-import { ITEMS, RARITY_LABEL, SNARES, THROW_LABEL, morph, roleLabel, type SnareId } from '../sim/content';
-import { Badge, Stars } from './bits';
+import { ITEMS, RARITY_LABEL, SNARES, THROW_LABEL, elementOf, morph, roleLabel, type SnareId } from '../sim/content';
+import { Badge, El, Stars } from './bits';
 
 /**
  * The catch screen. The Greeble bobs around; a ring around it shrinks and grows.
@@ -73,7 +73,7 @@ export function Encounter({ w, onDone, act }: { w: World; onDone: () => void; ac
         <button className="gr-btn" onClick={() => { w.leaveEncounter(); onDone(); }}>🏃 Leave</button>
         <div className="gr-enc-name">
           <b>{x.prism && '✨ '}{m.name}</b>
-          <span><span className={`r-${m.rarity}`}>{RARITY_LABEL[m.rarity]}</span> · {roleLabel(m.role)} · lv {x.lv}</span>
+          <span><span className={`r-${m.rarity}`}>{RARITY_LABEL[m.rarity]}</span> · <El id={elementOf(m.id)} long /> · {roleLabel(m.role)} · lv {x.lv}</span>
         </div>
       </div>
       <div className="gr-enc-field" onClick={throwIt}>

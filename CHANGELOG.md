@@ -1,5 +1,12 @@
 # Greebles — What's New
 
+## 0.4.0 — Battles that matter
+- Elements! Every Greeble and robot has one of 8 elements: Ash, Tide, Ember, Moss, Glass, Rust, Storm and Void. Each element hits two others 1.5× harder. There's a chart on the Fight tab.
+- Special moves: in a fight, each Greeble charges up a move (like Riptide, Flare Burst or Thunderclap). Tap it when it glows for a 3× hit. If you don't, it fires on its own at 2×.
+- Any Greeble can fight robots now, not just Skirmish ones (Skirmish still hit hardest). The fight buttons show ⬆ when your element is strong and ⬇ when it's weak.
+- Robots drop ⚙️ Robot Gears, and big robots and bosses drop 🔋 Power Cores. Craft snares, treats, Beacons, evolution items and even Star Snares at the new Workbench in the Shop.
+- The win check now counts elements and moves too.
+
 ## 0.3.0 — Areas, bosses & camp
 - A map! Four areas to explore: Ash Flats, Tide Pools, Rust Fields and Glass Spires. Each has its own Greebles, and wild Greebles are higher level the further you go.
 - Every area has a robot boss. Pick a team of up to 3 Greebles to fight it (Skirmish Greebles hit hardest). Beat it to open the next area.

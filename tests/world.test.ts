@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { World, newGame, migrate } from '../src/sim/world';
-import { FAMILIES, MORPHS, REGIONS, RULES, SPAWNABLE, craterAt, isNight, morph, stormAt } from '../src/sim/content';
+import { ELEMENTS, FAMILIES, MORPHS, RECIPES, REGIONS, RULES, SPAWNABLE, STRONG, craterAt, elementOf, isNight, morph, stormAt, typeMult } from '../src/sim/content';
 
 const T0 = 1_800_000_000_000;
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -241,7 +241,7 @@ describe('saves', () => {
     const old = { scrap: 120, bag: [{ u: 'g1', sp: 'draug', lv: 12, xp: 5 }, { u: 'g2', sp: 'nulith', lv: 3, xp: 0 }, { u: 'g3', sp: 'gone', lv: 1 }],
       camp: ['g2', null, null, null], huntAt: 0, campCarry: 0, fight: null, seen: { draug: true }, stats: { caught: 2 }, lastSeen: T0, tips: { walk: true } };
     const s = migrate(old, T0);
-    expect(s.version).toBe(3);
+    expect(s.version).toBe(4);
     expect(s.region).toBe('ash'); expect(s.unlocked).toBe(1);
     expect(s.bag.map(g => g.sp)).toEqual(['draug', 'nulith']);
     expect(s.bag[0].stars).toBe(3);
@@ -355,5 +355,67 @@ describe('0.3: areas, bosses, camp upgrades', () => {
     expect(s.spawns[0].reg).toBe('ash');
     const w = new World(s); w.advance(5000, T0);
     expect(w.s.fight).toBeNull(); expect(w.s.stats.wins).toBe(1);
+  });
+});
+
+describe('0.4: elements, moves, robot parts', () => {
+  it('every kind has an element; the chart is balanced (each beats 2, each is beaten by 2)', () => {
+    for (const m of MORPHS) expect(ELEMENTS[elementOf(m.id)]).toBeDefined();
+    const beatenBy: Record<string, number> = {};
+    for (const e of Object.keys(STRONG)) { expect(STRONG[e as keyof typeof STRONG].length).toBe(2); for (const x of STRONG[e as keyof typeof STRONG]) beatenBy[x] = (beatenBy[x] ?? 0) + 1; }
+    for (const e of Object.keys(ELEMENTS)) expect(beatenBy[e]).toBe(2);
+    expect(typeMult('tide', 'ember')).toBe(1.5); expect(typeMult('ember', 'tide')).toBeLessThan(1); expect(typeMult('tide', 'glass')).toBe(1);
+  });
+
+  it('the right element hits harder', () => {
+    const w = fresh();
+    const tide = give(w, 'nulith', 15), ember = give(w, 'zoln', 15);
+    // colossus is Ember: Tide beats it
+    expect(w.hitOn(w.get(tide)!, 'ember')).toBeGreaterThan(w.hitOn(w.get(tide)!, 'glass'));
+    expect(w.hitBy(w.get(ember)!, 20, 'tide')).toBeGreaterThan(w.hitBy(w.get(ember)!, 20, 'moss'));
+  });
+
+  it('any caste can fight a patrol now', () => {
+    const w = fresh();
+    const u = give(w, 'gleck', 20, 4);
+    expect(w.startFight(u, 'drone').ok).toBe(true);
+    w.advance(60_000, T0); expect(w.s.stats.wins).toBe(1);
+  });
+
+  it('a tapped move does 3x and resets the charge; untapped fires at 2x on its own', () => {
+    const w = fresh();
+    const u = give(w, 'draug', 5, 1);
+    w.startFight(u, 'colossus');
+    w.s.fight!.robotHp = w.s.fight!.robotMax = 1e6;    // won't end
+    w.s.fight!.team[0].hp = w.s.fight!.team[0].maxHp = 1e6;
+    const g = w.get(u)!; const base = w.hitOn(g, 'ember');
+    expect(w.useMove(u).ok).toBe(false);               // not charged
+    w.advance(4000, T0); w.drain();
+    expect(w.useMove(u).ok).toBe(true);
+    const before = w.s.fight!.robotHp; w.advance(1000, T0);
+    expect(before - w.s.fight!.robotHp).toBe(base * 3);
+    expect(w.s.fight!.team[0].charge).toBe(0);
+    w.drain(); w.advance(6000, T0);
+    const moves = w.drain().filter(e => e.t === 'move');
+    expect(moves.length).toBe(1); expect((moves[0] as any).tapped).toBe(false);
+  });
+
+  it('robots drop gears; gears craft into items', () => {
+    const w = fresh();
+    const u = give(w, 'draugoth', 25, 5);
+    w.startFight(u, 'drone'); w.advance(60_000, T0);
+    expect(w.count('gear')).toBeGreaterThan(0);
+    w.s.items.gear = 100; w.s.items.core = 10;
+    const star = RECIPES.findIndex(r => r.out === 'star');
+    expect(w.craft(star).ok).toBe(true);
+    expect(w.count('star')).toBe(1); expect(w.count('gear')).toBe(60); expect(w.count('core')).toBe(5);
+    w.s.items.gear = 0; expect(w.craft(0).ok).toBe(false);
+  });
+
+  it('bosses always drop Power Cores', () => {
+    const w = fresh();
+    const team = [give(w, 'draugoth', 30, 5), give(w, 'velmor', 30, 5), give(w, 'skarnex', 30, 5)];
+    w.startFight(team, 'boss', 'boss'); w.advance(300_000, T0);
+    expect(w.s.stats.bosses).toBe(1); expect(w.count('core')).toBeGreaterThan(0);
   });
 });

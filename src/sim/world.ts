@@ -3,18 +3,19 @@ import {
   STAR_WEIGHTS, START_ITEMS, THROW_MULT, TIER_WEIGHT, TREAT_MULT, WILD_MAX_LV,
   craterAt, hasMorph, isNight, morph, robot, stormAt, xpNeed,
   REGIONS, BOSS_REMATCH_MS, TEAM_MAX, UPGRADES, PRESS_MS_PER_SNARE, region, regionIndex, robotIn,
+  RECIPES, MOVE_AUTO, MOVE_AUTO_MULT, MOVE_CHARGE, MOVE_TAP_MULT, elementOf, typeMult, type Element,
   type Evo, type ItemId, type Morph, type Rarity, type RegionId, type Role, type SnareId, type UpgradeId,
 } from './content';
 import { nextRandom } from './rng';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export interface Greeble { u: string; sp: string; lv: number; xp: number; stars: number; prism: boolean; caughtAt?: number }
 export type SpawnSrc = 'wild' | 'crater' | 'beacon' | 'wreck' | 'mythic' | 'legend';
 export interface Spawn { id: string; sp: string; lv: number; stars: number; prism: boolean; src: SpawnSrc; at: number; until: number; x: number; y: number; reg: RegionId }
 export interface Encounter { spawn: string; treat: boolean; throws: number }
 export type FightKind = 'patrol' | 'wreck' | 'boss';
-export interface Fighter { u: string; hp: number; maxHp: number }
+export interface Fighter { u: string; hp: number; maxHp: number; charge: number; boost: boolean }
 export interface Fight { team: Fighter[]; robot: string; robotHp: number; robotMax: number; carry: number; kind: FightKind; reg: RegionId; /** convenience: first fighter */ u: string }
 export interface Wreck { robot: string; until: number }
 
@@ -97,6 +98,8 @@ export type GameEvent =
   | { t: 'fightLost'; sp: string; robot: string; wreck: boolean }
   | { t: 'bossWon'; reg: RegionId; first: boolean; scrap: number; unlocked?: RegionId; loot: Partial<Record<ItemId, number>> }
   | { t: 'bossLost'; reg: RegionId }
+  | { t: 'move'; u: string; dmg: number; tapped: boolean; mult: number }
+  | { t: 'crafted'; out: ItemId; n: number }
   | { t: 'wreck'; robot: string }
   | { t: 'reward'; id: string; label: string }
   | { t: 'beacon' };
@@ -431,14 +434,18 @@ export class World {
 
   // ── robots ────────────────────────────────────────────────
   /** Robot stats for a fight in the current area. */
-  foe(robotId: string, kind: FightKind): { name: string; hp: number; atk: number; xp: number; scrap: number } | null {
+  foe(robotId: string, kind: FightKind): { name: string; hp: number; atk: number; xp: number; scrap: number; el: Element; tier: number } | null {
     const reg = this.reg;
-    if (kind === 'boss') return { name: reg.boss.name, hp: reg.boss.hp, atk: reg.boss.atk, xp: reg.boss.xp, scrap: reg.boss.scrap };
+    if (kind === 'boss') return { name: reg.boss.name, hp: reg.boss.hp, atk: reg.boss.atk, xp: reg.boss.xp, scrap: reg.boss.scrap, el: reg.boss.el, tier: 3 };
     const r = robot(robotId); if (!r) return null;
     const st = robotIn(r, reg);
     const wreck = kind === 'wreck' ? RULES.wreckHpMult : 1;
-    return { name: r.name, hp: Math.round(st.hp * wreck), atk: st.atk, xp: st.xp, scrap: Math.round((4 + ROBOTS.indexOf(r) * 6) * reg.mult) };
+    return { name: r.name, hp: Math.round(st.hp * wreck), atk: st.atk, xp: st.xp, scrap: Math.round((4 + ROBOTS.indexOf(r) * 6) * reg.mult), el: r.el, tier: ROBOTS.indexOf(r) };
   }
+  /** One normal hit from this Greeble on this robot (element-aware). Skirmish hit full, other castes 60%. */
+  hitOn(g: Greeble, el: Element) { return Math.max(1, Math.round(this.teamPower(g) * typeMult(elementOf(g.sp), el))); }
+  /** One hit from the robot on this Greeble. */
+  hitBy(g: Greeble, atk: number, el: Element) { return Math.max(1, Math.round(atk * typeMult(el, elementOf(g.sp))) - Math.floor(g.lv / 5)); }
   private teamOf(us: string[]): Greeble[] | string {
     const ids = [...new Set(us)].slice(0, TEAM_MAX);
     const team = ids.map(u => this.get(u)).filter(Boolean) as Greeble[];
@@ -446,19 +453,35 @@ export class World {
     if (team.some(g => this.inCamp(g.u))) return 'Bench them from camp first.';
     return team;
   }
-  /** Simulate a fight on copies: would this team win? */
+  /** Simulate a fight on copies (moves fire on their own): would this team win? */
   wouldWin(us: string | string[], robotId: string, kind: FightKind | boolean = 'patrol'): boolean {
+    return this.winOdds(us, robotId, kind) >= 0.5;
+  }
+  /** Rough chance to win (0-1), from a few simulated fights. */
+  winOdds(us: string | string[], robotId: string, kind: FightKind | boolean = 'patrol'): number {
     const k: FightKind = typeof kind === 'boolean' ? (kind ? 'wreck' : 'patrol') : kind;
     const team = this.teamOf(Array.isArray(us) ? us : [us]); const foe = this.foe(robotId, k);
-    if (typeof team === 'string' || !foe) return false;
-    const hp = team.map(g => this.fighterHp(g));
-    let rhp = foe.hp, turn = 0;
-    for (let guard = 0; guard < 10_000; guard++) {
-      for (let i = 0; i < team.length; i++) if (hp[i] > 0) rhp -= k === 'boss' ? this.teamPower(team[i]) : Math.max(1, this.power(team[i]));
+    if (typeof team === 'string' || !foe) return 0;
+    if (team.length === 1) return this.simFight(team, foe, 0) ? 1 : 0;   // one target: no luck involved
+    let wins = 0; const N = 9;
+    for (let i = 0; i < N; i++) if (this.simFight(team, foe, i)) wins++;
+    return wins / N;
+  }
+  private simFight(team: Greeble[], foe: { hp: number; atk: number; el: Element }, seed: number): boolean {
+    const hp = team.map(g => this.fighterHp(g)), ch = team.map(() => 0);
+    const rs = { rng: seed * 7919 + 13 };
+    let rhp = foe.hp;
+    for (let guard = 0; guard < 5000; guard++) {
+      for (let i = 0; i < team.length; i++) if (hp[i] > 0) {
+        ch[i]++;
+        let dmg = this.hitOn(team[i], foe.el);
+        if (ch[i] >= MOVE_AUTO) { dmg *= MOVE_AUTO_MULT; ch[i] = 0; }
+        rhp -= dmg;
+      }
       if (rhp <= 0) return true;
       const alive = hp.map((h, i) => (h > 0 ? i : -1)).filter(i => i >= 0);
-      const t = alive[turn++ % alive.length];
-      hp[t] -= Math.max(1, foe.atk - Math.floor(team[t].lv / 5));
+      const t = alive[Math.floor(nextRandom(rs) * alive.length)];
+      hp[t] -= this.hitBy(team[t], foe.atk, foe.el);
       if (hp.every(h => h <= 0)) return false;
     }
     return false;
@@ -468,17 +491,23 @@ export class World {
     if (this.s.fight) return fail('A fight is already on.');
     const team = this.teamOf(Array.isArray(us) ? us : [us]);
     if (typeof team === 'string') return fail(team);
-    if (k !== 'boss') {
-      if (team.length > 1) return fail('Patrols are one on one.');
-      if (morph(team[0].sp).role !== 'fight') return fail('Only Skirmish Greebles fight robots.');
-    }
     if (k === 'wreck' && (!this.s.wreck || this.s.wreck.robot !== robotId)) return fail('The wreck is gone.');
     if (k === 'boss' && Date.now() < this.bossReadyAt(this.s.region)) return fail('The boss is still being rebuilt. Come back later.');
-    const foe = this.foe(robotId, k)!;
+    const foe = this.foe(robotId, k);
+    if (!foe) return fail('No such robot.');
     this.s.fight = {
-      team: team.map(g => { const hp = this.fighterHp(g); return { u: g.u, hp, maxHp: hp }; }), u: team[0].u,
+      team: team.map(g => { const hp = this.fighterHp(g); return { u: g.u, hp, maxHp: hp, charge: 0, boost: false }; }), u: team[0].u,
       robot: k === 'boss' ? 'boss' : robotId, robotHp: foe.hp, robotMax: foe.hp, carry: 0, kind: k, reg: this.s.region,
     };
+    return OK;
+  }
+  /** Tap a charged Greeble's special move: its next hit does 3× damage. */
+  useMove(u: string): ActionResult {
+    const x = this.s.fight?.team.find(t => t.u === u);
+    if (!x || x.hp <= 0) return fail('It is not fighting.');
+    if (x.charge < MOVE_CHARGE) return fail('Not charged yet.');
+    if (x.boost) return fail('Already ready!');
+    x.boost = true;
     return OK;
   }
   private fightRound(now: number) {
@@ -490,7 +519,14 @@ export class World {
     const foe = this.foe(f.robot, f.kind);
     const alive = f.team.filter(x => x.hp > 0 && this.get(x.u));
     if (!foe || !alive.length) { this.s.fight = null; return; }
-    for (const x of alive) { const g = this.get(x.u)!; f.robotHp -= f.kind === 'boss' ? this.teamPower(g) : Math.max(1, this.power(g)); }
+    for (const x of alive) {
+      const g = this.get(x.u)!;
+      x.charge = (x.charge ?? 0) + 1;
+      let dmg = this.hitOn(g, foe.el);
+      if (x.boost) { dmg *= MOVE_TAP_MULT; this.emit({ t: 'move', u: x.u, dmg, tapped: true, mult: typeMult(elementOf(g.sp), foe.el) }); x.boost = false; x.charge = 0; }
+      else if (x.charge >= MOVE_AUTO) { dmg *= MOVE_AUTO_MULT; this.emit({ t: 'move', u: x.u, dmg, tapped: false, mult: typeMult(elementOf(g.sp), foe.el) }); x.charge = 0; }
+      f.robotHp -= dmg;
+    }
     const lead = this.get(alive[0].u)!;
     if (f.robotHp <= 0) {
       this.s.fight = null;
@@ -499,6 +535,10 @@ export class World {
       for (const x of f.team) { const g = this.get(x.u); if (g) this.addXp(g, share); }
       const loot: Partial<Record<ItemId, number>> = {};
       const add = (k: ItemId, n: number) => { loot[k] = (loot[k] ?? 0) + n; };
+      const ri = regionIndex(f.reg);
+      // robot parts: everyone drops gears, big robots and bosses can drop a Power Core
+      add('gear', (1 + foe.tier + Math.floor(this.rand() * 2)) * (ri + 1) * (f.kind === 'boss' ? 4 : f.kind === 'wreck' ? 2 : 1));
+      if (f.kind === 'boss' ? true : this.rand() < [0.02, 0.06, 0.15][foe.tier] + (f.kind === 'wreck' ? 0.1 : 0)) add('core', f.kind === 'boss' ? 1 + ri : 1);
       if (f.kind === 'boss') {
         const reg = region(f.reg); const first = !this.s.bossBeaten[f.reg];
         const scrap = reg.boss.scrap * (first ? 1 : 0.5);
@@ -509,21 +549,18 @@ export class World {
         if (first) { add('star', 1); add(EVO_ITEMS[Math.floor(this.rand() * EVO_ITEMS.length)], 1); }
         for (const [k, v] of Object.entries(loot) as [ItemId, number][]) this.give(k, v);
         let unlocked: RegionId | undefined;
-        const idx = regionIndex(f.reg);
-        if (first && idx + 1 < REGIONS.length && this.s.unlocked <= idx + 1) { this.s.unlocked = idx + 2; unlocked = REGIONS[idx + 1].id; }
-        // The area's Legendary shows itself right away (once per win).
+        if (first && ri + 1 < REGIONS.length && this.s.unlocked <= ri + 1) { this.s.unlocked = ri + 2; unlocked = REGIONS[ri + 1].id; }
         const reg0 = this.s.region; this.s.region = f.reg;
         this.addSpawn(now, 'legend', reg.legendary, 30 * 60_000);
         this.s.region = reg0;
         this.emit({ t: 'bossWon', reg: f.reg, first, scrap, unlocked, loot });
         return;
       }
-      const ri = ROBOTS.findIndex(r => r.id === f.robot);
       const scrap = Math.round((foe.scrap + lead.lv) * (f.kind === 'wreck' ? 2 : 1));
       this.earn(scrap);
       add('snare', 2 + Math.floor(this.rand() * 3));
-      if (this.rand() < 0.25 + ri * 0.15) add('good', 1);
-      if (this.rand() < 0.03 + ri * 0.04 + (f.kind === 'wreck' ? 0.1 : 0)) add(EVO_ITEMS[Math.floor(this.rand() * EVO_ITEMS.length)], 1);
+      if (this.rand() < 0.25 + foe.tier * 0.15) add('good', 1);
+      if (this.rand() < 0.03 + foe.tier * 0.04 + (f.kind === 'wreck' ? 0.1 : 0)) add(EVO_ITEMS[Math.floor(this.rand() * EVO_ITEMS.length)], 1);
       if (f.kind === 'wreck' && this.rand() < 0.5) add('great', 1);
       for (const [k, v] of Object.entries(loot) as [ItemId, number][]) this.give(k, v);
       if (f.kind === 'wreck') {
@@ -534,15 +571,25 @@ export class World {
       this.emit({ t: 'fightWon', sp: lead.sp, robot: f.robot, scrap, loot, wreck: f.kind === 'wreck' });
       return;
     }
-    // the robot hits one Greeble (round-robin over whoever is still standing)
     const tgt = alive[Math.floor(this.rand() * alive.length)];
-    tgt.hp -= Math.max(1, foe.atk - Math.floor(this.get(tgt.u)!.lv / 5));
+    tgt.hp -= this.hitBy(this.get(tgt.u)!, foe.atk, foe.el);
     if (f.team.every(x => x.hp <= 0)) {
       this.s.stats.losses++;
       this.s.fight = null;
       if (f.kind === 'boss') this.emit({ t: 'bossLost', reg: f.reg });
       else this.emit({ t: 'fightLost', sp: lead.sp, robot: f.robot, wreck: f.kind === 'wreck' });
     }
+  }
+
+  // ── crafting ──────────────────────────────────────────────
+  craft(i: number): ActionResult {
+    const r = RECIPES[i]; if (!r) return fail('No such recipe.');
+    if (this.count('gear') < r.gear || this.count('core') < r.core) return fail(`Needs ${r.gear} Gears${r.core ? ` and ${r.core} Cores` : ''}.`);
+    this.s.items.gear = this.count('gear') - r.gear;
+    this.s.items.core = this.count('core') - r.core;
+    this.give(r.out, r.n);
+    this.emit({ t: 'crafted', out: r.out, n: r.n });
+    return OK;
   }
 
   // ── camp upgrades ─────────────────────────────────────────
@@ -596,7 +643,7 @@ export class World {
   }
 }
 
-/** Old (0.1 / 0.2) or hand-edited saves are cleaned up here so a bad blob can never crash the game. */
+/** Old (0.1 - 0.3) or hand-edited saves are cleaned up here so a bad blob can never crash the game. */
 export function migrate(raw: any, now = Date.now()): GameState {
   const fresh = newGame(undefined, now);
   if (!raw || typeof raw !== 'object') return fresh;
@@ -622,7 +669,7 @@ export function migrate(raw: any, now = Date.now()): GameState {
     // 0.2 fights had a single Greeble ({u, hp, maxHp, wreck}); 0.3 has a team.
     const team: Fighter[] = (Array.isArray(f.team) ? f.team : [{ u: f.u, hp: f.hp, maxHp: f.maxHp }])
       .filter((x: any) => x && ids.has(x.u) && !camp.includes(x.u)).slice(0, TEAM_MAX)
-      .map((x: any) => ({ u: x.u, hp: num(x.hp, 1), maxHp: num(x.maxHp, 1) }));
+      .map((x: any) => ({ u: x.u, hp: num(x.hp, 1), maxHp: num(x.maxHp, 1), charge: Math.max(0, num(x.charge, 0) | 0), boost: x.boost === true }));
     const kind: FightKind = f.kind === 'boss' || f.kind === 'wreck' ? f.kind : f.wreck === true ? 'wreck' : 'patrol';
     if (team.length && (kind === 'boss' || robot(f.robot))) {
       fight = { team, u: team[0].u, robot: kind === 'boss' ? 'boss' : f.robot, robotHp: num(f.robotHp, 1), robotMax: num(f.robotMax, 1),

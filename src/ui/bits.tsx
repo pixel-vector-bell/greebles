@@ -1,4 +1,4 @@
-import type { Morph } from '../sim/content';
+import { ELEMENTS, type Element, type Morph } from '../sim/content';
 
 export function Badge({ m, size = 40, prism = false }: { m: Morph; size?: number; prism?: boolean }) {
   return (
@@ -22,3 +22,8 @@ export const fmtTime = (ms: number) => {
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`;
 };
 export const fmtDur = (ms: number) => { const m = Math.round(ms / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+
+export function El({ id, long = false }: { id: Element; long?: boolean }) {
+  const e = ELEMENTS[id];
+  return <span className="gr-el" style={{ borderColor: e.color, color: e.color }} title={e.name}>{e.icon}{long ? ` ${e.name}` : ''}</span>;
+}

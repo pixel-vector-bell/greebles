@@ -6,7 +6,7 @@
  */
 export type Role = 'mine' | 'fish' | 'fight';
 export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic';
-export type ItemId = 'snare' | 'good' | 'great' | 'star' | 'treat' | 'beacon' | 'ember' | 'pearl' | 'sun' | 'moon';
+export type ItemId = 'snare' | 'good' | 'great' | 'star' | 'treat' | 'beacon' | 'ember' | 'pearl' | 'sun' | 'moon' | 'gear' | 'core';
 export type SnareId = 'snare' | 'good' | 'great' | 'star';
 export type Tag = 'night' | 'storm';
 
@@ -129,15 +129,67 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   pearl: { name: 'Tide Pearl', icon: '🫧', desc: 'Evolves Murk Greebles.', price: 800 },
   sun: { name: 'Sun Prism', icon: '🌞', desc: 'Evolves a Glass Greeble into a Prism Greeble.', price: 800 },
   moon: { name: 'Moon Prism', icon: '🌙', desc: 'Evolves a Glass Greeble into a Dusk Glass.', price: 800 },
+  gear: { name: 'Robot Gear', icon: '⚙️', desc: 'Dropped by robots. Craft with it at the workbench.' },
+  core: { name: 'Power Core', icon: '🔋', desc: 'A rare robot part from big robots and bosses.' },
 };
+
+// ── 0.4: crafting with robot parts ─────────────────────────
+export interface Recipe { out: ItemId; n: number; gear: number; core: number }
+export const RECIPES: Recipe[] = [
+  { out: 'snare', n: 5, gear: 2, core: 0 },
+  { out: 'good', n: 1, gear: 3, core: 0 },
+  { out: 'great', n: 1, gear: 8, core: 0 },
+  { out: 'treat', n: 2, gear: 3, core: 0 },
+  { out: 'beacon', n: 1, gear: 15, core: 1 },
+  { out: 'ember', n: 1, gear: 20, core: 2 },
+  { out: 'pearl', n: 1, gear: 20, core: 2 },
+  { out: 'sun', n: 1, gear: 20, core: 2 },
+  { out: 'moon', n: 1, gear: 20, core: 2 },
+  { out: 'star', n: 1, gear: 40, core: 5 },
+];
+
+// ── 0.4: elements ──────────────────────────────────────────
+export type Element = 'ash' | 'tide' | 'ember' | 'moss' | 'glass' | 'rust' | 'storm' | 'void';
+export interface ElementDef { id: Element; name: string; icon: string; color: string; move: string }
+export const ELEMENTS: Record<Element, ElementDef> = {
+  ash: { id: 'ash', name: 'Ash', icon: '🌫️', color: '#9a8aa8', move: 'Cinder Cloud' },
+  tide: { id: 'tide', name: 'Tide', icon: '💧', color: '#4a9ad8', move: 'Riptide' },
+  ember: { id: 'ember', name: 'Ember', icon: '🔥', color: '#e0602a', move: 'Flare Burst' },
+  moss: { id: 'moss', name: 'Moss', icon: '🌿', color: '#6aa848', move: 'Vine Lash' },
+  glass: { id: 'glass', name: 'Glass', icon: '💎', color: '#70d0e0', move: 'Prism Beam' },
+  rust: { id: 'rust', name: 'Rust', icon: '🔩', color: '#b8704a', move: 'Scrap Toss' },
+  storm: { id: 'storm', name: 'Storm', icon: '⚡', color: '#e0c840', move: 'Thunderclap' },
+  void: { id: 'void', name: 'Void', icon: '🌑', color: '#7a5aa8', move: 'Null Pulse' },
+};
+/** Who each element is strong against. (The reverse is weak.) */
+export const STRONG: Record<Element, Element[]> = {
+  tide: ['ember', 'rust'], ember: ['moss', 'glass'], moss: ['tide', 'ash'], ash: ['ember', 'storm'],
+  storm: ['void', 'rust'], glass: ['storm', 'void'], rust: ['glass', 'moss'], void: ['ash', 'tide'],
+};
+export const STRONG_MULT = 1.5, WEAK_MULT = 0.67;
+export function typeMult(att: Element, def: Element): number {
+  if (STRONG[att].includes(def)) return STRONG_MULT;
+  if (STRONG[def].includes(att)) return WEAK_MULT;
+  return 1;
+}
+/** Element of every family (by stage-1 id), plus a few evolutions that change element. */
+const FAMILY_EL: Record<string, Element> = {
+  ashpup: 'ash', vorr: 'moss', klyx: 'glass', umberith: 'ash', zoln: 'ember', phaest: 'ember', quorvex: 'ash',
+  tidling: 'tide', iskari: 'storm', vesperid: 'void', thalune: 'tide', orryx: 'tide', caelith: 'storm', aelurion: 'tide',
+  scrappling: 'rust', velm: 'rust', skarnox: 'moss', hokari: 'void', pyrrax: 'ember', nyxil: 'void', myrrhax: 'rust',
+  shellit: 'tide', coralin: 'moss', boltik: 'storm', cogling: 'rust', shardy: 'glass', lumen: 'glass', aurelith: 'glass', starborn: 'void',
+};
+const EL_OVERRIDE: Record<string, Element> = { klyxen: 'void', lumenar: 'ember', boltaros: 'storm', thalorn: 'void' };
+/** Moves charge up one per round; tap at MOVE_CHARGE, or it fires by itself (weaker) at MOVE_AUTO. */
+export const MOVE_CHARGE = 4, MOVE_AUTO = 6, MOVE_TAP_MULT = 3, MOVE_AUTO_MULT = 2;
 export const EVO_ITEMS: ItemId[] = ['ember', 'pearl', 'sun', 'moon'];
 export const START_ITEMS: Partial<Record<ItemId, number>> = { snare: 20, good: 3, treat: 3 };
 
-export interface Robot { id: string; name: string; short: string; hp: number; atk: number; xp: number; weight: number }
+export interface Robot { id: string; name: string; short: string; hp: number; atk: number; xp: number; weight: number; el: Element }
 export const ROBOTS: Robot[] = [
-  { id: 'drone', name: 'Rust drone', short: 'Drone', hp: 16, atk: 3, xp: 8, weight: 50 },
-  { id: 'pylon', name: 'Sentinel pylon', short: 'Pylon', hp: 32, atk: 7, xp: 18, weight: 35 },
-  { id: 'colossus', name: 'Patrol colossus', short: 'Colossus', hp: 58, atk: 12, xp: 32, weight: 15 },
+  { id: 'drone', name: 'Rust drone', short: 'Drone', hp: 16, atk: 3, xp: 8, weight: 50, el: 'rust' },
+  { id: 'pylon', name: 'Sentinel pylon', short: 'Pylon', hp: 32, atk: 7, xp: 18, weight: 35, el: 'storm' },
+  { id: 'colossus', name: 'Patrol colossus', short: 'Colossus', hp: 58, atk: 12, xp: 32, weight: 15, el: 'ember' },
 ];
 
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -186,7 +238,7 @@ export const REWARDS: Reward[] = [
 
 // ── 0.3: areas of the planet ──────────────────────────────
 export type RegionId = 'ash' | 'tide' | 'rust' | 'glass';
-export interface Boss { name: string; hp: number; atk: number; xp: number; scrap: number }
+export interface Boss { name: string; hp: number; atk: number; xp: number; scrap: number; el: Element }
 export interface Region {
   id: RegionId; name: string; icon: string; blurb: string;
   /** Wild Greebles here are this many levels higher. */
@@ -200,16 +252,16 @@ export interface Region {
 export const REGIONS: Region[] = [
   { id: 'ash', name: 'Ash Flats', icon: '🏜️', blurb: 'Where you crashed. Dusty, warm, and full of young Greebles.', lvl: 0, mult: 1,
     kinds: ['ashpup', 'vorr', 'scrappling', 'velm', 'skarnox', 'tidling', 'umberith', 'zoln', 'phaest'], legendary: 'quorvex',
-    boss: { name: 'Rust Warden', hp: 120, atk: 9, xp: 150, scrap: 300 } },
+    boss: { name: 'Rust Warden', hp: 120, atk: 9, xp: 150, scrap: 300, el: 'rust' } },
   { id: 'tide', name: 'Tide Pools', icon: '🌊', blurb: 'Warm shallow water. Trawl Greebles love it here.', lvl: 6, mult: 2.2,
     kinds: ['tidling', 'iskari', 'vesperid', 'thalune', 'orryx', 'caelith', 'shellit', 'coralin', 'vorr'], legendary: 'aelurion',
-    boss: { name: 'Tide Dredger', hp: 500, atk: 18, xp: 400, scrap: 1200 } },
+    boss: { name: 'Tide Dredger', hp: 500, atk: 18, xp: 400, scrap: 1200, el: 'tide' } },
   { id: 'rust', name: 'Rust Fields', icon: '⚙️', blurb: 'An old robot junkyard. The robots here hit hard.', lvl: 12, mult: 4,
     kinds: ['scrappling', 'velm', 'hokari', 'pyrrax', 'nyxil', 'umberith', 'zoln', 'boltik', 'cogling'], legendary: 'myrrhax',
-    boss: { name: 'Scrap Colossus', hp: 1200, atk: 30, xp: 900, scrap: 4000 } },
+    boss: { name: 'Scrap Colossus', hp: 1200, atk: 30, xp: 900, scrap: 4000, el: 'storm' } },
   { id: 'glass', name: 'Glass Spires', icon: '💎', blurb: 'Tall crystal towers that glow at night. The rarest Greebles live here.', lvl: 18, mult: 7,
     kinds: ['klyx', 'vesperid', 'hokari', 'shardy', 'lumen', 'iskari', 'phaest', 'caelith', 'nyxil'], legendary: 'aurelith',
-    boss: { name: 'Prism Sentinel', hp: 2500, atk: 45, xp: 2000, scrap: 12000 } },
+    boss: { name: 'Prism Sentinel', hp: 2500, atk: 45, xp: 2000, scrap: 12000, el: 'glass' } },
 ];
 export const region = (id: string): Region => REGIONS.find(r => r.id === id) ?? REGIONS[0];
 export const regionIndex = (id: string) => Math.max(0, REGIONS.findIndex(r => r.id === id));
@@ -247,6 +299,9 @@ export const FAMILIES: Morph[][] = SPAWNABLE.map(root => {
   walk(root);
   return out;
 });
+const rootOf = new Map<string, string>();
+for (const fam of FAMILIES) for (const m of fam) rootOf.set(m.id, fam[0].id);
+export const elementOf = (id: string): Element => EL_OVERRIDE[id] ?? FAMILY_EL[rootOf.get(id) ?? id] ?? 'ash';
 export const roleLabel = (r: Role) => (r === 'mine' ? 'Dig' : r === 'fish' ? 'Trawl' : 'Skirmish');
 const ROLES: Role[] = ['mine', 'fish', 'fight'];
 
