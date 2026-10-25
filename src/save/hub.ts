@@ -1,6 +1,6 @@
 import { loadLocal } from './storage';
 import { migrate, type GameState } from '../sim/world';
-import { morph } from '../sim/content';
+import { MORPHS } from '../sim/content';
 
 /**
  * Cloud save through the IdleForge hub. Inside the hub (?hub=1) the game asks the parent page
@@ -35,10 +35,11 @@ export async function pickStartSave(): Promise<GameState | null> {
 }
 
 export function summary(s: GameState): string {
-  if (!s.bag.length) return 'New — walk the planet, find a Greeble';
-  const best = s.bag.reduce((a, b) => (b.lv > a.lv ? b : a));
-  const camping = s.camp.filter(Boolean).length;
-  return `${s.bag.length} Greebles · best ${morph(best.sp).name} lv ${best.lv} · ${camping}/4 camping · ${Math.floor(s.scrap).toLocaleString('en-US')} scrap`;
+  const caught = Object.keys(s.caught ?? {}).length;
+  const wild = s.spawns?.length ?? 0;
+  if (!s.bag.length) return wild ? `New — ${wild} Greebles are waiting in the wilds` : 'New — catch your first Greeble';
+  const prism = s.bag.filter(g => g.prism).length;
+  return `Guide ${caught}/${MORPHS.length}${prism ? ` · ✨${prism}` : ''} · ${s.bag.length} in bag${wild ? ` · ${wild} in the wilds` : ''}`;
 }
 
 export function sendToHub(s: GameState, flush = false): void {
