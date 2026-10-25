@@ -241,7 +241,7 @@ describe('saves', () => {
     const old = { scrap: 120, bag: [{ u: 'g1', sp: 'draug', lv: 12, xp: 5 }, { u: 'g2', sp: 'nulith', lv: 3, xp: 0 }, { u: 'g3', sp: 'gone', lv: 1 }],
       camp: ['g2', null, null, null], huntAt: 0, campCarry: 0, fight: null, seen: { draug: true }, stats: { caught: 2 }, lastSeen: T0, tips: { walk: true } };
     const s = migrate(old, T0);
-    expect(s.version).toBe(4);
+    expect(s.version).toBe(5);
     expect(s.region).toBe('ash'); expect(s.unlocked).toBe(1);
     expect(s.bag.map(g => g.sp)).toEqual(['draug', 'nulith']);
     expect(s.bag[0].stars).toBe(3);
@@ -406,10 +406,10 @@ describe('0.4: elements, moves, robot parts', () => {
     w.startFight(u, 'drone'); w.advance(60_000, T0);
     expect(w.count('gear')).toBeGreaterThan(0);
     w.s.items.gear = 100; w.s.items.core = 10;
-    const star = RECIPES.findIndex(r => r.out === 'star');
+    const star = RECIPES.findIndex(r => r.out === 'star' && r.cost.gear);
     expect(w.craft(star).ok).toBe(true);
     expect(w.count('star')).toBe(1); expect(w.count('gear')).toBe(60); expect(w.count('core')).toBe(5);
-    w.s.items.gear = 0; expect(w.craft(0).ok).toBe(false);
+    w.s.items.gear = 0; expect(w.craft(RECIPES.findIndex(r => r.cost.gear === 2)).ok).toBe(false);
   });
 
   it('bosses always drop Power Cores', () => {
@@ -417,5 +417,48 @@ describe('0.4: elements, moves, robot parts', () => {
     const team = [give(w, 'draugoth', 30, 5), give(w, 'velmor', 30, 5), give(w, 'skarnex', 30, 5)];
     w.startFight(team, 'boss', 'boss'); w.advance(300_000, T0);
     expect(w.s.stats.bosses).toBe(1); expect(w.count('core')).toBeGreaterThan(0);
+  });
+});
+
+describe('0.5: camp jobs, area favour, bait', () => {
+  it('campers bring back materials by caste', () => {
+    const w = fresh(11);
+    w.assign(give(w, 'gleckor', 20, 5)); w.assign(give(w, 'nulithar', 20, 5)); w.assign(give(w, 'draugoth', 20, 5));
+    w.advance(HOUR, T0);
+    expect(w.count('ore')).toBeGreaterThan(0); expect(w.count('kelp')).toBeGreaterThan(0); expect(w.count('gear')).toBeGreaterThan(0);
+  });
+
+  it('the favoured caste works better (Dig in Ash Flats, Trawl in Tide Pools)', () => {
+    const w = fresh(); w.s.unlocked = 4;
+    const dig = w.get(give(w, 'gleck', 10, 3))!, trawl = w.get(give(w, 'nulith', 10, 3))!;
+    expect(w.jobOf(dig).chance).toBeGreaterThan(w.jobOf(trawl).chance);
+    expect(w.yieldOf(dig)).toBeGreaterThan(w.yieldOf(trawl) - 0.01);
+    w.travel('tide');
+    expect(w.jobOf(trawl).chance).toBeGreaterThan(w.jobOf(dig).chance);
+  });
+
+  it('strong Dig Greebles in the Glass Spires find Crystal', () => {
+    const w = fresh(); w.s.unlocked = 4; w.travel('glass');
+    const g = w.get(give(w, 'shardon', 20, 5))!;
+    expect(w.jobOf(g).item).toBe('crystal');
+  });
+
+  it('caste bait brings in mostly that caste; only one bait at a time', () => {
+    const w = fresh(21); w.s.items.lureTrawl = 2; w.s.spawns = [];
+    expect(w.useLure('lureTrawl', T0).ok).toBe(true);
+    expect(w.useLure('lureTrawl', T0).ok).toBe(false);
+    let trawl = 0, total = 0;
+    for (let t = T0; t < T0 + 30 * MIN; t += 30_000) { w.updateWilds(t); for (const x of w.s.spawns.filter(x => x.src === 'lure')) { total++; if (morph(x.sp).role === 'fish') trawl++; } w.s.spawns = w.s.spawns.filter(x => x.src !== 'lure'); }
+    expect(total).toBeGreaterThanOrEqual(4);
+    expect(trawl / total).toBeGreaterThan(0.5);
+    w.updateWilds(T0 + 31 * MIN); expect(w.s.lure).toBeNull();
+  });
+
+  it('crafting uses materials', () => {
+    const w = fresh(); w.s.items.kelp = 3;
+    const i = RECIPES.findIndex(r => r.out === 'treat');
+    const t0 = w.count('treat');
+    expect(w.craft(i).ok).toBe(true); expect(w.count('treat')).toBe(t0 + 2); expect(w.count('kelp')).toBe(0);
+    expect(w.craft(i).ok).toBe(false);
   });
 });

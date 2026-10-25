@@ -4,7 +4,8 @@ import {
   FAMILIES, ITEMS, MORPHS, RARITY_LABEL, REWARDS, ROBOTS, RULES, SNARES, craterAt, isNight, morph, roleLabel, stormAt, untilFlip, xpNeed,
   REGIONS, TEAM_MAX, UPGRADES, region, robotIn,
   ELEMENTS, MOVE_AUTO, MOVE_CHARGE, RECIPES, STRONG, elementOf, typeMult,
-  type Element, type ItemId, type RegionId,
+  LURES,
+  type Element, type ItemId, type LureId, type RegionId,
 } from '../sim/content';
 import { saveLocal, wipeLocal } from '../save/storage';
 import { onHubFlush, sendToHub } from '../save/hub';
@@ -35,6 +36,7 @@ function message(e: GameEvent, w: World): string | null {
     case 'wreck': return `🤖 A robot is guarding a wreck. Beat it on the Fight tab for a burst of Greebles!`;
     case 'reward': return `📖 Guide reward: ${e.label}!`;
     case 'beacon': return '🛰️ Beacon on! Greebles will wander in fast for 30 minutes.';
+    case 'lure': return `🪤 ${ITEMS[e.id].name} is out! Greebles will wander in for 30 minutes.`;
     case 'crafted': return `🔨 Made ${e.n} ${ITEMS[e.out].name}${e.n > 1 ? 's' : ''}.`;
     case 'move': { const g = w.get(e.u); return g ? `${ELEMENTS[elementOf(g.sp)].icon} ${ELEMENTS[elementOf(g.sp)].move}! ${n(e.dmg)} damage${e.mult > 1 ? ' — super strong!' : ''}` : null; }
     case 'bossLost': return `Your team was beaten by the ${region(e.reg).boss.name}. Level up, evolve, and try again!`;
@@ -44,7 +46,7 @@ function message(e: GameEvent, w: World): string | null {
 
 const TIPS: { id: string; tab: Tab; text: string }[] = [
   { id: 'wilds', tab: 'wilds', text: 'Greebles wander into the wilds over time, even when the game is closed (up to 6 at once). Tap one, then throw a snare when the ring is small!' },
-  { id: 'camp', tab: 'camp', text: 'Greebles in camp earn scrap and xp every 15 seconds, even when the game is closed. Better stars and evolved forms earn more.' },
+  { id: 'camp', tab: 'camp', text: 'Greebles in camp earn scrap and bring back Ore, Kelp or Gears, even while the game is closed. Camp moves with you, and each area favours one caste.' },
   { id: 'bag', tab: 'bag', text: 'Greebles evolve when they reach the right level (some need an item, or night time). Graft a copy in for a big level jump and a chance at more stars.' },
   { id: 'fight', tab: 'fight', text: 'Any Greeble can fight robots now (Skirmish hit hardest). Pick the right element for a 1.5× hit, and tap a Greeble\'s move when it glows!' },
   { id: 'boss', tab: 'fight', text: 'Each area has a robot boss. Beat it with a team of up to 3 to open the next area and call out its Legendary Greeble!' },
@@ -62,7 +64,7 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
   const [tab, setTab] = useState<Tab>('wilds');
   const [toast, setToast] = useState<string | null>(null);
   const [menu, setMenu] = useState<null | 'settings' | 'news' | 'dev'>(null);
-  const [away, setAway] = useState<null | { ms: number; scrap: number; levels: number; waiting: number }>(null);
+  const [away, setAway] = useState<null | { ms: number; scrap: number; levels: number; waiting: number; got: Partial<Record<ItemId, number>> }>(null);
   const [bossWin, setBossWin] = useState<null | Extract<GameEvent, { t: 'bossWon' }>>(null);
   const [evolving, setEvolving] = useState<null | { from: string; to: string; prism: boolean }>(null);
   const [encOpen, setEncOpen] = useState(() => !!world.s.enc);
@@ -201,6 +203,7 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
             <h2>Welcome back</h2>
             <p>You were gone {fmtDur(away.ms)}{away.ms >= world.offlineCap ? ` (camp counts up to ${Math.round(world.offlineCap / 3600000)} hours)` : ''}.</p>
             {away.scrap > 0 && <p className="gr-big">+{n(away.scrap)} scrap</p>}
+            {Object.keys(away.got).length > 0 && <p>Your campers brought back {(Object.entries(away.got) as [ItemId, number][]).map(([k, v]) => `${ITEMS[k].icon} ${n(v)} ${ITEMS[k].name}`).join(' · ')}</p>}
             {away.levels > 0 && <p>Your campers went up {away.levels} level{away.levels > 1 ? 's' : ''}.</p>}
             {away.waiting > 0 && <p className="gr-big2">🌿 {away.waiting} Greeble{away.waiting > 1 ? 's are' : ' is'} out in the wilds!</p>}
             <button className="gr-btn-big" onClick={() => { setAway(null); setTab('wilds'); }}>{away.waiting > 0 ? 'Go catch them' : 'Nice'}</button>
@@ -266,7 +269,7 @@ function WildsView({ w, now, engage, act }: V & { now: number; engage: (id: stri
           );
         })}
       </div>
-      <p className="gr-dim small gr-region-blurb">{reg.icon} <b>{reg.name}</b> — {reg.blurb}{reg.lvl ? ` Wild Greebles here are +${reg.lvl} levels.` : ''}{s.bossBeaten[reg.id] ? ` ${morph(reg.legendary).name} roams here now…` : ''}</p>
+      <p className="gr-dim small gr-region-blurb">{reg.icon} <b>{reg.name}</b> — {reg.blurb}{reg.lvl ? ` Wild Greebles here are +${reg.lvl} levels.` : ''} {roleLabel(reg.favor)} campers work 1.5× better here.{s.bossBeaten[reg.id] ? ` ${morph(reg.legendary).name} roams here now…` : ''}</p>
       <section className={`gr-wilds reg-${reg.id} ${isNight(now) ? 'night' : ''} ${storm?.on ? 'storm' : ''}`}>
         {spawns.map(x => {
           const m = morph(x.sp);
@@ -299,6 +302,16 @@ function WildsView({ w, now, engage, act }: V & { now: number; engage: (id: stri
             <div className="gr-dim small">{beaconLeft > 0 ? <span className="gr-ok">ON for {fmtTime(beaconLeft)}</span> : '30 min of Greebles wandering in fast.'}</div>
           </div>
           <button className="gr-btn o" disabled={w.count('beacon') < 1} onClick={() => act(w.useBeacon(Date.now()))}>{beaconLeft > 0 ? '+30 min' : 'Turn on'}</button>
+        </div>
+        <div className="gr-spot">
+          <span className="gr-spot-ic">🪤</span>
+          <div className="gr-grow">
+            <b>Bait</b>
+            {s.lure && s.lure.until > now
+              ? <div className="gr-ok small">{ITEMS[s.lure.id].name} out in {region(s.lure.reg).name} for {fmtTime(s.lure.until - now)}</div>
+              : <div className="gr-dim small">Set out bait for 30 min of Greebles. Craft it at the Workbench.</div>}
+            {!(s.lure && s.lure.until > now) && <div className="gr-btns left">{(Object.keys(LURES) as LureId[]).map(id => <button key={id} className="gr-btn" disabled={w.count(id) < 1} onClick={() => act(w.useLure(id, Date.now()))}>{ITEMS[id].icon} {w.count(id)}</button>)}</div>}
+          </div>
         </div>
         <div className="gr-spot">
           <span className="gr-spot-ic">🤖</span>
@@ -338,15 +351,16 @@ function Row({ g, w, right, now }: { g: Greeble; w: World; right?: React.ReactNo
 
 function CampView({ w, act }: V) {
   const s = w.s;
+  const jobTag = (g: Greeble) => { const j = w.jobOf(g); return <span className="gr-job">{w.favored(g) && '⭐'}{ITEMS[j.item].icon} {Math.round(j.chance * 100)}%</span>; };
   const free = s.bag.filter(g => !w.busy(g.u)).sort((a, b) => w.yieldOf(b) - w.yieldOf(a) || b.lv - a.lv);
   const full = !s.camp.includes(null);
   return (
     <>
       <section className="gr-card">
         <h2>Camp · {s.camp.filter(Boolean).length}/{s.camp.length} working</h2>
-        <p className="gr-dim">Every 15 seconds each camper earns scrap and a little xp, even while you're away (up to {Math.round(w.offlineCap / 3600000)} hours). Build tents or fill the Field Guide for more spots.</p>
+        <p className="gr-dim">Camp is set up in {w.reg.icon} <b>{w.reg.name}</b>. Every 15 seconds each camper earns scrap and xp, and has a chance to bring back 🪨 Ore (Dig), 🌱 Kelp (Trawl) or ⚙️ Gears (Skirmish). ⭐ {roleLabel(w.reg.favor)} Greebles work 1.5× better here. Keeps going while you're away (up to {Math.round(w.offlineCap / 3600000)} h).</p>
         {s.camp.map((u, i) => { const g = u ? w.get(u) : undefined; return g
-          ? <Row key={i} g={g} w={w} right={<button className="gr-btn" onClick={() => act(w.bench(i))}>Bench</button>} />
+          ? <Row key={i} g={g} w={w} right={<div className="gr-btns col">{jobTag(g)}<button className="gr-btn" onClick={() => act(w.bench(i))}>Bench</button></div>} />
           : <div key={i} className="gr-row empty">Empty camp spot {i + 1}</div>; })}
       </section>
       <section className="gr-card">
@@ -524,13 +538,14 @@ function ShopView({ w, act, now }: V & { now: number }) {
       </section>
       <section className="gr-card">
         <h2>Workbench</h2>
-        <p className="gr-dim small">Robots drop ⚙️ Robot Gears (and big ones 🔋 Power Cores). Turn them into gear here. You have ⚙️ {n(w.count('gear'))} · 🔋 {n(w.count('core'))}.</p>
+        <p className="gr-dim small">Robots drop ⚙️ Gears and 🔋 Cores. Camp Greebles bring back 🪨 Ore (Dig), 🌱 Kelp (Trawl) and sometimes 🔷 Crystal (Dig in the Glass Spires).</p>
+        <div className="gr-items">{(['gear', 'core', 'ore', 'kelp', 'crystal'] as ItemId[]).map(k => <span key={k} className="gr-chip">{ITEMS[k].icon} {n(w.count(k))}</span>)}</div>
         {RECIPES.map((r, i) => {
-          const ok = w.count('gear') >= r.gear && w.count('core') >= r.core;
+          const ok = (Object.entries(r.cost) as [ItemId, number][]).every(([k, v]) => w.count(k) >= v);
           return (
             <div key={i} className="gr-row">
               <span className="gr-item-ic">{ITEMS[r.out].icon}</span>
-              <div className="gr-grow"><b>{r.n > 1 ? `${r.n}× ` : ''}{ITEMS[r.out].name}</b><div className="gr-dim small">⚙️ {r.gear}{r.core ? ` · 🔋 ${r.core}` : ''}</div></div>
+              <div className="gr-grow"><b>{r.n > 1 ? `${r.n}× ` : ''}{ITEMS[r.out].name}</b> <span className="gr-dim small">· have {w.count(r.out)}</span><div className="gr-cost">{(Object.entries(r.cost) as [ItemId, number][]).map(([k, v]) => <span key={k} className={w.count(k) >= v ? '' : 'gr-bad'}>{ITEMS[k].icon} {v} {ITEMS[k].name.replace('Robot ', '').replace('Power ', '')}</span>)}</div></div>
               <button className="gr-btn o" disabled={!ok} onClick={() => act(w.craft(i))}>Craft</button>
             </div>
           );

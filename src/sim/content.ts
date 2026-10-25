@@ -6,7 +6,8 @@
  */
 export type Role = 'mine' | 'fish' | 'fight';
 export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic';
-export type ItemId = 'snare' | 'good' | 'great' | 'star' | 'treat' | 'beacon' | 'ember' | 'pearl' | 'sun' | 'moon' | 'gear' | 'core';
+export type ItemId = 'snare' | 'good' | 'great' | 'star' | 'treat' | 'beacon' | 'ember' | 'pearl' | 'sun' | 'moon' | 'gear' | 'core'
+  | 'ore' | 'kelp' | 'crystal' | 'lureDig' | 'lureTrawl' | 'lureFight' | 'lureRare';
 export type SnareId = 'snare' | 'good' | 'great' | 'star';
 export type Tag = 'night' | 'storm';
 
@@ -131,21 +132,40 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   moon: { name: 'Moon Prism', icon: '🌙', desc: 'Evolves a Glass Greeble into a Dusk Glass.', price: 800 },
   gear: { name: 'Robot Gear', icon: '⚙️', desc: 'Dropped by robots. Craft with it at the workbench.' },
   core: { name: 'Power Core', icon: '🔋', desc: 'A rare robot part from big robots and bosses.' },
+  ore: { name: 'Ore', icon: '🪨', desc: 'Dug up by Dig Greebles in camp.' },
+  kelp: { name: 'Kelp', icon: '🌱', desc: 'Pulled in by Trawl Greebles in camp.' },
+  crystal: { name: 'Crystal', icon: '🔷', desc: 'Rare. Dig Greebles find it in the Glass Spires.' },
+  lureDig: { name: 'Dig Bait', icon: '🟤', desc: '30 min: Greebles wander in fast, mostly Dig ones.' },
+  lureTrawl: { name: 'Trawl Bait', icon: '🔵', desc: '30 min: Greebles wander in fast, mostly Trawl ones.' },
+  lureFight: { name: 'Skirmish Bait', icon: '🔴', desc: '30 min: Greebles wander in fast, mostly Skirmish ones.' },
+  lureRare: { name: 'Shiny Bait', icon: '🌈', desc: '30 min: Greebles wander in fast, rare ones 3× more, Prismatic 3× more.' },
 };
+export type LureId = 'lureDig' | 'lureTrawl' | 'lureFight' | 'lureRare';
+export const LURES: Record<LureId, { role?: Role; rare?: boolean }> = { lureDig: { role: 'mine' }, lureTrawl: { role: 'fish' }, lureFight: { role: 'fight' }, lureRare: { rare: true } };
+export const LURE_MS = 30 * 60 * 1000;
+export const LURE_SPAWN_MIN = 3 * 60 * 1000, LURE_SPAWN_MAX = 6 * 60 * 1000;
+/** Camp jobs: what each caste brings back (chance per 15 s tick, before bonuses). */
+export const JOB: Record<Role, { item: ItemId; chance: number }> = { mine: { item: 'ore', chance: 0.12 }, fish: { item: 'kelp', chance: 0.12 }, fight: { item: 'gear', chance: 0.08 } };
+export const FAVOR_MULT = 1.5;
 
 // ── 0.4: crafting with robot parts ─────────────────────────
-export interface Recipe { out: ItemId; n: number; gear: number; core: number }
+export interface Recipe { out: ItemId; n: number; cost: Partial<Record<ItemId, number>> }
 export const RECIPES: Recipe[] = [
-  { out: 'snare', n: 5, gear: 2, core: 0 },
-  { out: 'good', n: 1, gear: 3, core: 0 },
-  { out: 'great', n: 1, gear: 8, core: 0 },
-  { out: 'treat', n: 2, gear: 3, core: 0 },
-  { out: 'beacon', n: 1, gear: 15, core: 1 },
-  { out: 'ember', n: 1, gear: 20, core: 2 },
-  { out: 'pearl', n: 1, gear: 20, core: 2 },
-  { out: 'sun', n: 1, gear: 20, core: 2 },
-  { out: 'moon', n: 1, gear: 20, core: 2 },
-  { out: 'star', n: 1, gear: 40, core: 5 },
+  { out: 'snare', n: 5, cost: { gear: 2 } },
+  { out: 'snare', n: 5, cost: { ore: 3 } },
+  { out: 'good', n: 1, cost: { gear: 3 } },
+  { out: 'great', n: 1, cost: { ore: 5, kelp: 5 } },
+  { out: 'treat', n: 2, cost: { kelp: 3 } },
+  { out: 'lureDig', n: 1, cost: { ore: 12, gear: 2 } },
+  { out: 'lureTrawl', n: 1, cost: { kelp: 12, gear: 2 } },
+  { out: 'lureFight', n: 1, cost: { gear: 14 } },
+  { out: 'lureRare', n: 1, cost: { crystal: 3, ore: 10, kelp: 10 } },
+  { out: 'beacon', n: 1, cost: { gear: 15, core: 1 } },
+  { out: 'ember', n: 1, cost: { ore: 25, core: 2 } },
+  { out: 'pearl', n: 1, cost: { kelp: 25, core: 2 } },
+  { out: 'sun', n: 1, cost: { crystal: 4, core: 2 } },
+  { out: 'moon', n: 1, cost: { crystal: 4, core: 2 } },
+  { out: 'star', n: 1, cost: { gear: 40, core: 5 } },
 ];
 
 // ── 0.4: elements ──────────────────────────────────────────
@@ -243,6 +263,8 @@ export interface Region {
   id: RegionId; name: string; icon: string; blurb: string;
   /** Wild Greebles here are this many levels higher. */
   lvl: number;
+  /** Campers of this caste work 1.5× better here. */
+  favor: Role;
   /** Robots here are this much tougher. */
   mult: number;
   kinds: string[];
@@ -250,16 +272,16 @@ export interface Region {
   boss: Boss;
 }
 export const REGIONS: Region[] = [
-  { id: 'ash', name: 'Ash Flats', icon: '🏜️', blurb: 'Where you crashed. Dusty, warm, and full of young Greebles.', lvl: 0, mult: 1,
+  { id: 'ash', name: 'Ash Flats', icon: '🏜️', blurb: 'Where you crashed. Dusty, warm, and full of young Greebles.', lvl: 0, mult: 1, favor: 'mine',
     kinds: ['ashpup', 'vorr', 'scrappling', 'velm', 'skarnox', 'tidling', 'umberith', 'zoln', 'phaest'], legendary: 'quorvex',
     boss: { name: 'Rust Warden', hp: 120, atk: 9, xp: 150, scrap: 300, el: 'rust' } },
-  { id: 'tide', name: 'Tide Pools', icon: '🌊', blurb: 'Warm shallow water. Trawl Greebles love it here.', lvl: 6, mult: 2.2,
+  { id: 'tide', name: 'Tide Pools', icon: '🌊', blurb: 'Warm shallow water. Trawl Greebles love it here.', lvl: 6, mult: 2.2, favor: 'fish',
     kinds: ['tidling', 'iskari', 'vesperid', 'thalune', 'orryx', 'caelith', 'shellit', 'coralin', 'vorr'], legendary: 'aelurion',
     boss: { name: 'Tide Dredger', hp: 500, atk: 18, xp: 400, scrap: 1200, el: 'tide' } },
-  { id: 'rust', name: 'Rust Fields', icon: '⚙️', blurb: 'An old robot junkyard. The robots here hit hard.', lvl: 12, mult: 4,
+  { id: 'rust', name: 'Rust Fields', icon: '⚙️', blurb: 'An old robot junkyard. The robots here hit hard.', lvl: 12, mult: 4, favor: 'fight',
     kinds: ['scrappling', 'velm', 'hokari', 'pyrrax', 'nyxil', 'umberith', 'zoln', 'boltik', 'cogling'], legendary: 'myrrhax',
     boss: { name: 'Scrap Colossus', hp: 1200, atk: 30, xp: 900, scrap: 4000, el: 'storm' } },
-  { id: 'glass', name: 'Glass Spires', icon: '💎', blurb: 'Tall crystal towers that glow at night. The rarest Greebles live here.', lvl: 18, mult: 7,
+  { id: 'glass', name: 'Glass Spires', icon: '💎', blurb: 'Tall crystal towers that glow at night. The rarest Greebles live here.', lvl: 18, mult: 7, favor: 'mine',
     kinds: ['klyx', 'vesperid', 'hokari', 'shardy', 'lumen', 'iskari', 'phaest', 'caelith', 'nyxil'], legendary: 'aurelith',
     boss: { name: 'Prism Sentinel', hp: 2500, atk: 45, xp: 2000, scrap: 12000, el: 'glass' } },
 ];

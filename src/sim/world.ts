@@ -3,15 +3,16 @@ import {
   STAR_WEIGHTS, START_ITEMS, THROW_MULT, TIER_WEIGHT, TREAT_MULT, WILD_MAX_LV,
   craterAt, hasMorph, isNight, morph, robot, stormAt, xpNeed,
   REGIONS, BOSS_REMATCH_MS, TEAM_MAX, UPGRADES, PRESS_MS_PER_SNARE, region, regionIndex, robotIn,
+  JOB, FAVOR_MULT, LURES, LURE_MS, LURE_SPAWN_MIN, LURE_SPAWN_MAX, type LureId,
   RECIPES, MOVE_AUTO, MOVE_AUTO_MULT, MOVE_CHARGE, MOVE_TAP_MULT, elementOf, typeMult, type Element,
   type Evo, type ItemId, type Morph, type Rarity, type RegionId, type Role, type SnareId, type UpgradeId,
 } from './content';
 import { nextRandom } from './rng';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 export interface Greeble { u: string; sp: string; lv: number; xp: number; stars: number; prism: boolean; caughtAt?: number }
-export type SpawnSrc = 'wild' | 'crater' | 'beacon' | 'wreck' | 'mythic' | 'legend';
+export type SpawnSrc = 'wild' | 'crater' | 'beacon' | 'wreck' | 'mythic' | 'legend' | 'lure';
 export interface Spawn { id: string; sp: string; lv: number; stars: number; prism: boolean; src: SpawnSrc; at: number; until: number; x: number; y: number; reg: RegionId }
 export interface Encounter { spawn: string; treat: boolean; throws: number }
 export type FightKind = 'patrol' | 'wreck' | 'boss';
@@ -52,6 +53,10 @@ export interface GameState {
   bossBeaten: Partial<Record<RegionId, number>>;
   upgrades: Partial<Record<UpgradeId, number>>;
   pressCarry: number;
+  /** Bait set out in an area: Greebles wander in fast for 30 min. */
+  lure: { id: LureId; reg: RegionId; until: number; next: number } | null;
+  /** Materials brought back by campers (for the welcome-back card / stats). */
+  gathered: Partial<Record<ItemId, number>>;
   /** Kinds met in the wilds (or owned). */
   seen: Record<string, true>;
   /** Kinds ever owned. */
@@ -72,7 +77,7 @@ export function newGame(seed = (Math.random() * 2 ** 31) | 0, now = Date.now()):
     items: { ...START_ITEMS },
     spawns: [], wildClock: now, nextAmbientAt: now + RULES.ambientMinMs, nextCraterAt: 0, nextBeaconAt: 0, beaconUntil: 0,
     wreck: null, nextWreckAt: now + RULES.wreckFirstMs, enc: null,
-    region: 'ash', unlocked: 1, bossBeaten: {}, upgrades: {}, pressCarry: 0,
+    region: 'ash', unlocked: 1, bossBeaten: {}, upgrades: {}, pressCarry: 0, lure: null, gathered: {},
     seen: {}, caught: {}, prismCaught: {}, claimed: {}, stats: freshStats(), lastSeen: now, tips: {},
   };
   // A few Greebles are already out there on day one.
@@ -100,6 +105,7 @@ export type GameEvent =
   | { t: 'bossLost'; reg: RegionId }
   | { t: 'move'; u: string; dmg: number; tapped: boolean; mult: number }
   | { t: 'crafted'; out: ItemId; n: number }
+  | { t: 'lure'; id: LureId }
   | { t: 'wreck'; robot: string }
   | { t: 'reward'; id: string; label: string }
   | { t: 'beacon' };
@@ -138,7 +144,7 @@ export class World {
   quality(g: { stars: number; prism: boolean }) { return (1 + (g.stars - 1) * 0.1) * (g.prism ? 1.2 : 1); }
   power(g: Greeble) { const m = morph(g.sp); return Math.round((BASE_POWER[m.rarity] + (m.stage - 1) * 2 + g.lv + (m.role === 'fight' ? 2 : 0)) * this.quality(g)); }
   fighterHp(g: Greeble) { return 10 + this.power(g) * 2; }
-  yieldOf(g: Greeble) { const m = morph(g.sp); return Math.round((1 + Math.floor(g.lv / 4) + (m.stage - 1) + (m.role === 'fight' ? 1 : 0)) * this.quality(g) * (1 + this.up('bench') * 0.1) * 10) / 10; }
+  yieldOf(g: Greeble) { const m = morph(g.sp); return Math.round((1 + Math.floor(g.lv / 4) + (m.stage - 1) + (m.role === 'fight' ? 1 : 0)) * this.quality(g) * (1 + this.up('bench') * 0.1) * (m.role === this.reg.favor ? 1.25 : 1) * 10) / 10; }
   /** Bosses: everyone can help, but only Skirmish Greebles hit at full power. */
   teamPower(g: Greeble) { return Math.max(1, Math.round(this.power(g) * (morph(g.sp).role === 'fight' ? 1 : 0.6))); }
   sellValue(g: Greeble) { return Math.round(SELL[morph(g.sp).rarity] * g.lv * (g.prism ? 5 : 1)); }
@@ -175,7 +181,7 @@ export class World {
     return 1;
   }
   /** Pick a kind to spawn. `role` boosts one caste (Glow Crater); `rareBoost` shifts odds up (robot wrecks). */
-  rollKind(t: number, opts: { role?: Role; rareBoost?: number } = {}): Morph {
+  rollKind(t: number, opts: { role?: Role; rareBoost?: number; prismBoost?: number; roleMult?: number } = {}): Morph {
     const night = isNight(t), storm = !!stormAt(t)?.on;
     const reg = this.reg;
     const pool = SPAWNABLE.filter(m => (!m.nightOnly || night) && m.rarity !== 'mythic' && m.rarity !== 'legendary' && reg.kinds.includes(m.id));
@@ -186,7 +192,7 @@ export class World {
     const weights = pool.map(m => {
       let w = TIER_WEIGHT[m.rarity] / perTier.get(m.rarity)!;
       if (opts.rareBoost && RARITIES.indexOf(m.rarity) >= 2) w *= opts.rareBoost;
-      if (opts.role && m.role === opts.role) w *= 4;
+      if (opts.role && m.role === opts.role) w *= opts.roleMult ?? 4;
       if (night && m.tags?.includes('night')) w *= 3;
       if (storm && m.tags?.includes('storm')) w *= 3;
       return w;
@@ -195,12 +201,12 @@ export class World {
     for (let i = 0; i < pool.length; i++) { r -= weights[i]; if (r < 0) return pool[i]; }
     return pool[0];
   }
-  addSpawn(t: number, src: SpawnSrc, sp?: string, life?: number, opts: { role?: Role; rareBoost?: number } = {}): Spawn {
+  addSpawn(t: number, src: SpawnSrc, sp?: string, life?: number, opts: { role?: Role; rareBoost?: number; prismBoost?: number; roleMult?: number } = {}): Spawn {
     const m = sp ? morph(sp) : this.rollKind(t, opts);
-    const lifeMs = life ?? (src === 'wild' ? RULES.ambientLifeMs : src === 'beacon' ? RULES.beaconLifeMs : src === 'wreck' ? RULES.wreckSpawnLifeMs : RULES.ambientLifeMs);
+    const lifeMs = life ?? (src === 'wild' ? RULES.ambientLifeMs : src === 'beacon' || src === 'lure' ? RULES.beaconLifeMs : src === 'wreck' ? RULES.wreckSpawnLifeMs : RULES.ambientLifeMs);
     const x: Spawn = {
       id: this.uid('w'), sp: m.id, lv: Math.min(RULES.maxLevel, 1 + Math.floor(this.rand() * WILD_MAX_LV[m.rarity]) + this.reg.lvl), stars: this.rollStars(),
-      prism: this.rand() < RULES.prismOdds, src, at: t, until: t + lifeMs, x: 0, y: 0, reg: this.s.region,
+      prism: this.rand() < RULES.prismOdds * (opts.prismBoost ?? 1), src, at: t, until: t + lifeMs, x: 0, y: 0, reg: this.s.region,
     };
     // spread them out so tiles don't sit on top of each other (best of a few tries)
     let best = { x: 0.5, y: 0.5, d: -1 };
@@ -265,6 +271,17 @@ export class World {
       if (this.countSrc('beacon') < RULES.beaconCap) this.addSpawn(t, 'beacon');
       s.nextBeaconAt = t + this.between(RULES.hotMinMs, RULES.hotMaxMs);
     }
+    const lu = s.lure;
+    if (lu) {
+      if (t >= lu.until) s.lure = null;
+      else if (t >= lu.next) {
+        const def = LURES[lu.id];
+        const reg0 = s.region; s.region = lu.reg;
+        if (this.countSrc('lure') < RULES.beaconCap) this.addSpawn(t, 'lure', undefined, undefined, def.rare ? { rareBoost: 3, prismBoost: 3 } : { role: def.role, roleMult: 12 });
+        s.region = reg0;
+        lu.next = t + this.between(LURE_SPAWN_MIN, LURE_SPAWN_MAX);
+      }
+    }
     // The Starborn Greeble: very rarely, on a stormy night.
     if (isNight(t) && stormAt(t)?.on && !this.here.some(x => x.src === 'mythic') && this.rand() < 1 / 400) this.addSpawn(t, 'mythic', 'starborn', 20 * 60_000);
     if (!s.wreck && t >= s.nextWreckAt) {
@@ -282,6 +299,17 @@ export class World {
     this.s.beaconUntil = Math.max(now, this.s.beaconUntil) + RULES.beaconLenMs;
     this.s.nextBeaconAt = now;
     this.emit({ t: 'beacon' });
+    this.updateWilds(now + 1);
+    return OK;
+  }
+
+  useLure(id: LureId, now: number): ActionResult {
+    if (!LURES[id]) return fail('That is not bait.');
+    if (this.count(id) < 1) return fail('You have none. Craft some at the Workbench.');
+    if (this.s.lure && this.s.lure.until > now) return fail('Bait is already out.');
+    this.s.items[id] = this.count(id) - 1;
+    this.s.lure = { id, reg: this.s.region, until: now + LURE_MS, next: now };
+    this.emit({ t: 'lure', id });
     this.updateWilds(now + 1);
     return OK;
   }
@@ -584,9 +612,10 @@ export class World {
   // ── crafting ──────────────────────────────────────────────
   craft(i: number): ActionResult {
     const r = RECIPES[i]; if (!r) return fail('No such recipe.');
-    if (this.count('gear') < r.gear || this.count('core') < r.core) return fail(`Needs ${r.gear} Gears${r.core ? ` and ${r.core} Cores` : ''}.`);
-    this.s.items.gear = this.count('gear') - r.gear;
-    this.s.items.core = this.count('core') - r.core;
+    const cost = Object.entries(r.cost) as [ItemId, number][];
+    const short = cost.find(([k, v]) => this.count(k) < v);
+    if (short) return fail(`Needs ${short[1]} ${ITEMS[short[0]].name}.`);
+    for (const [k, v] of cost) this.s.items[k] = this.count(k) - v;
     this.give(r.out, r.n);
     this.emit({ t: 'crafted', out: r.out, n: r.n });
     return OK;
@@ -606,11 +635,27 @@ export class World {
     return OK;
   }
 
+  /** Is this Greeble's caste favoured where camp is right now? */
+  favored(g: Greeble) { return morph(g.sp).role === this.reg.favor; }
+  /** Chance per tick this camper brings something back, and what. */
+  jobOf(g: Greeble): { item: ItemId; chance: number } {
+    const m = morph(g.sp); const j = JOB[m.role];
+    const item: ItemId = m.role === 'mine' && this.s.region === 'glass' && g.lv >= 15 ? 'crystal' : j.item;
+    const chance = Math.min(0.9, j.chance * this.quality(g) * (1 + (m.stage - 1) * 0.25) * (this.favored(g) ? FAVOR_MULT : 1) * (item === 'crystal' ? 0.4 : 1));
+    return { item, chance };
+  }
   private campPayout() {
+    const ri = regionIndex(this.s.region);
     for (const u of this.s.camp) {
       const g = u ? this.get(u) : undefined; if (!g) continue;
       this.earn(this.yieldOf(g));
       this.addXp(g, RULES.campXp);
+      const job = this.jobOf(g);
+      if (this.rand() < job.chance) {
+        const n = job.item === 'crystal' ? 1 : 1 + Math.floor(ri / 2) + Math.floor(g.lv / 20);
+        this.give(job.item, n);
+        this.s.gathered[job.item] = (this.s.gathered[job.item] ?? 0) + n;
+      }
     }
   }
 
@@ -633,17 +678,20 @@ export class World {
   }
 
   /** Offline catch-up: camp (capped) + the wilds. Returns what happened for the welcome-back card. */
-  catchUp(ms: number, now = Date.now()): { ms: number; scrap: number; levels: number; waiting: number } {
+  catchUp(ms: number, now = Date.now()): { ms: number; scrap: number; levels: number; waiting: number; got: Partial<Record<ItemId, number>> } {
     const capped = Math.min(Math.max(0, ms), this.offlineCap);
     const before = this.s.scrap;
+    const g0 = { ...this.s.gathered };
     this.advance(capped, now);
     this.updateWilds(now);
     const levels = this.drain().filter(e => e.t === 'level').length;
-    return { ms: capped, scrap: this.s.scrap - before, levels, waiting: this.here.length };
+    const got: Partial<Record<ItemId, number>> = {};
+    for (const [k, v] of Object.entries(this.s.gathered) as [ItemId, number][]) { const d = v - (g0[k] ?? 0); if (d > 0) got[k] = d; }
+    return { ms: capped, scrap: this.s.scrap - before, levels, waiting: this.here.length, got };
   }
 }
 
-/** Old (0.1 - 0.3) or hand-edited saves are cleaned up here so a bad blob can never crash the game. */
+/** Old (0.1 - 0.4) or hand-edited saves are cleaned up here so a bad blob can never crash the game. */
 export function migrate(raw: any, now = Date.now()): GameState {
   const fresh = newGame(undefined, now);
   if (!raw || typeof raw !== 'object') return fresh;
@@ -686,7 +734,7 @@ export function migrate(raw: any, now = Date.now()): GameState {
   const spawns: Spawn[] = Array.isArray(raw.spawns)
     ? raw.spawns.filter((x: any) => x && typeof x.id === 'string' && hasMorph(x.sp) && num(x.until, 0) > 0).slice(0, 40)
         .map((x: any) => ({ id: x.id, sp: x.sp, lv: Math.max(1, num(x.lv, 1) | 0), stars: Math.min(5, Math.max(1, num(x.stars, 1) | 0)), prism: x.prism === true,
-          src: (['wild', 'crater', 'beacon', 'wreck', 'mythic', 'legend'].includes(x.src) ? x.src : 'wild') as SpawnSrc, at: num(x.at, now), until: num(x.until, now), x: num(x.x, 0.5), y: num(x.y, 0.5),
+          src: (['wild', 'crater', 'beacon', 'wreck', 'mythic', 'legend', 'lure'].includes(x.src) ? x.src : 'wild') as SpawnSrc, at: num(x.at, now), until: num(x.until, now), x: num(x.x, 0.5), y: num(x.y, 0.5),
           reg: (regIds.includes(x.reg) ? x.reg : 'ash') as RegionId }))
     : fresh.spawns;
   const sid = new Set(spawns.map(x => x.id));
@@ -706,6 +754,8 @@ export function migrate(raw: any, now = Date.now()): GameState {
   for (const u of UPGRADES) { const v = Math.min(u.prices.length, Math.max(0, num(raw.upgrades?.[u.id], 0) | 0)); if (v) upgrades[u.id] = v; }
   return {
     region: reg, unlocked, bossBeaten, upgrades, pressCarry: Math.max(0, num(raw.pressCarry, 0)),
+    lure: raw.lure && LURES[raw.lure.id as LureId] && regIds.includes(raw.lure.reg) ? { id: raw.lure.id, reg: raw.lure.reg, until: num(raw.lure.until, 0), next: num(raw.lure.next, 0) } : null,
+    gathered: Object.fromEntries(Object.entries(raw.gathered ?? {}).filter(([k, v]) => k in ITEMS && typeof v === 'number' && v >= 0)) as Partial<Record<ItemId, number>>,
     version: SAVE_VERSION,
     rng: num(raw.rng, fresh.rng) | 0,
     nextId: Math.max(num(raw.nextId, 1), maxId + 1),

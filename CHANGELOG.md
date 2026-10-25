@@ -1,5 +1,12 @@
 # Greebles — What's New
 
+## 0.5.0 — Jobs & bait
+- Camp jobs: campers now bring things back. Dig Greebles find 🪨 Ore, Trawl Greebles pull in 🌱 Kelp, and Skirmish Greebles salvage ⚙️ Gears. Strong Dig Greebles in the Glass Spires sometimes find rare 🔷 Crystal. This keeps going while you're away.
+- Camp moves with you. Each area favours one caste: Dig in Ash Flats and Glass Spires, Trawl in Tide Pools, Skirmish in Rust Fields. Favoured campers (⭐) find things 1.5× more and earn 25% more scrap.
+- Bait: craft Dig, Trawl or Skirmish Bait to bring out lots of that caste for 30 minutes, or Shiny Bait for 3× rare Greebles and 3× Prismatic odds.
+- The Workbench has new recipes that use Ore, Kelp and Crystal, including Great Snares, treats and evolution items.
+- The welcome-back card shows what your campers brought back.
+
 ## 0.4.0 — Battles that matter
 - Elements! Every Greeble and robot has one of 8 elements: Ash, Tide, Ember, Moss, Glass, Rust, Storm and Void. Each element hits two others 1.5× harder. There's a chart on the Fight tab.
 - Special moves: in a fight, each Greeble charges up a move (like Riptide, Flare Burst or Thunderclap). Tap it when it glows for a 3× hit. If you don't, it fires on its own at 2×.
