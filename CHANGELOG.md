@@ -1,5 +1,11 @@
 # Greebles — What's New
 
+## 0.11.1 — Five more touch-ups
+- 🎨 Tide Pup now wears a yellow raincoat and boots and no longer looks see-through.
+- 🎨 Drift Greeble is paler with a cloud on its head, so it's easy to tell apart from Tide Pup.
+- 🎨 Ash Pup looks like a little baby now, and Ash Greeble is a tall miner with an axe, so the two are easy to tell apart.
+- 🎨 Rift Pup lost the swirl on its belly.
+
 ## 0.11.0 — Every Greeble looks like a Greeble
 - 🎨 61 of the 72 Greebles have been redrawn. Before, many looked like little dragons or bats, with wings, bat ears or lizard tails. Now every one is clearly the same goblin species: pointed goblin ears, a flat face and a big grin.
 - 🧢 Each family has its own outfit or prop, so they're easier to tell apart: miner lamps, raincoats, pirate hats, boxing gloves, headphones, crowns and more.

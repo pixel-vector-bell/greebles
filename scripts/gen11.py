@@ -76,8 +76,13 @@ D = {
 # 0.11 round 2: stricter ears for the stubborn ones
 T2 = ("goblin creature with two pointed elf-like goblin ears made of solid skin, flat round face with no snout, big round eyes, tiny nose, wide friendly grin, cream belly, "
       "chubby round body, short arms and legs, no tail, no wings. Cute 2D flat vector sticker, thick black outline, cel shaded, full body standing, centered, plain white background")
-N2 = N + ", bat ears, membrane ears, veined ears, ear membranes, fins, fin ears, frills, pikachu ears, yellow mouse, turtle, ghost"
+N2 = N + ", spiral, swirl, spiral belly, bubble, translucent, transparent, slime, bat ears, membrane ears, veined ears, ear membranes, fins, fin ears, frills, pikachu ears, yellow mouse, turtle, ghost"
 D2 = {
+ 'tidling': 'tiny baby blue goblin wearing a bright yellow raincoat and yellow rain boots, holding a little toy bucket',
+ 'iskari': 'pale white and mint goblin holding the string of a red paper kite, wearing a light teal scarf blowing in the wind',
+ 'ashpup': 'tiny baby lavender goblin toddler wearing a big yellow hard hat too large for its head, holding a little candle',
+ 'gleck': 'tall lean dusky purple-grey goblin miner with a red bandana tied on its head, a pickaxe over its shoulder and a sack of rocks',
+ 'riftling': 'small lavender goblin kid wearing an oversized purple hoodie, hands in the hoodie pocket, cheeky grin',
  'riftling': 'small lavender goblin kid with a messy purple tuft of hair and a torn violet scarf, mischievous grin',
  'caelithar': 'white and sky-blue goblin with plain pointed ears, wearing aviator goggles, a brown leather flight jacket and a long blue scarf',
  'verdance': 'bright-green goblin with a crown of pink and yellow flowers on its head and a leafy green poncho, holding a flowering staff',
