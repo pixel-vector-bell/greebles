@@ -64,6 +64,17 @@ const TIPS: { id: string; tab: Tab; text: string }[] = [
   { id: 'shop', tab: 'shop', text: 'Spend scrap on snares, treats and Beacons, or craft them at the Workbench from robot parts.' },
 ];
 
+/** Wide screens (PC / tablet landscape) get the two-pane layout: Wilds on the left, other tabs on the right. */
+function useDesktop() {
+  const q = '(min-width: 1000px) and (min-height: 560px)';
+  const [d, setD] = useState(() => typeof matchMedia !== 'undefined' && matchMedia(q).matches);
+  useEffect(() => {
+    const m = matchMedia(q); const on = () => setD(m.matches);
+    m.addEventListener('change', on); return () => m.removeEventListener('change', on);
+  }, []);
+  return d;
+}
+
 export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
   const worldRef = useRef<World | null>(null);
   if (!worldRef.current) worldRef.current = new World(start);
@@ -74,7 +85,8 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
   const redraw = () => setFrame(f => (f + 1) % 1e6);
   const [tab, setTab] = useState<Tab>('wilds');
   const [toast, setToast] = useState<string | null>(null);
-  const [menu, setMenu] = useState<null | 'settings' | 'news' | 'dev'>(null);
+  const [menu, setMenu] = useState<null | 'settings' | 'news' | 'dev' | 'reset'>(null);
+  const desktop = useDesktop();
   const [away, setAway] = useState<null | { ms: number; scrap: number; levels: number; waiting: number; got: Partial<Record<ItemId, number>>; eggs: number }>(null);
   const [bossWin, setBossWin] = useState<null | Extract<GameEvent, { t: 'bossWon' }>>(null);
   const [evolving, setEvolving] = useState<null | { from: string; to: string; prism: boolean }>(null);
@@ -146,7 +158,6 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
   const readyToEvolve = s.bag.some(g => world.evoOptions(g, now).some(o => o.ready));
 
   const startOver = () => {
-    if (!confirm('Start over? Your Greebles, scrap and items will be gone.')) return;
     world.s = newGame();
     world.drain();
     wipeLocal();
@@ -154,10 +165,26 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
     save(true);
     setMenu(null); setTab('wilds'); setEncOpen(false); redraw();
   };
+  // Desktop: Wilds always shows on the left, so the right pane shows Camp when "Wilds" is picked.
+  const pane: Tab = desktop && tab === 'wilds' ? 'camp' : tab;
+  const navEl = (
+    <nav className={`gr-tabs ${desktop ? 'desk' : ''}`}>
+      {TABS.filter(t => !desktop || t.id !== 'wilds').map(t => (
+        <button key={t.id} className={pane === t.id ? 'on' : ''} onClick={() => { setTab(t.id); setToast(null); }}>
+          <span className="gr-ti">{t.icon}</span><span>{t.label}</span>
+          {t.id === 'wilds' && tab !== 'wilds' && world.here.length > 0 && <i className="gr-count">{world.here.length}</i>}
+          {t.id === 'bag' && readyToEvolve && <i className="gr-dot gold" />}
+          {t.id === 'camp' && s.eggs.some(e => e.left <= 0) && <i className="gr-dot gold" />}
+          {t.id === 'guide' && HUNTS.some(h => world.huntState(h, now) === 'ready') && <i className="gr-dot gold" />}
+          {t.id === 'fight' && (s.fight || s.wreck) && <i className={`gr-dot ${s.wreck ? 'gold' : 'red'}`} />}
+        </button>
+      ))}
+    </nav>
+  );
   const engage = (id: string) => { const r = world.startEncounter(id); if (!r.ok) act(r); else { setEncKey(k => k + 1); setEncOpen(true); save(); redraw(); } };
 
   return (
-    <div className="gr-app" onPointerDown={unlock}>
+    <div className={`gr-app ${desktop ? 'desk' : ''}`} onPointerDown={unlock}>
       <header className="gr-top">
         <div className="gr-title"><b>GREEBLES</b><span>{world.reg.icon} {world.reg.name} {isNight(now) ? '🌙' : '☀️'}{stormAt(now)?.on ? '⛈️' : ''}</span></div>
         <div className="gr-sp" />
@@ -167,29 +194,29 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
       </header>
       <div className="gr-sub">Bag {s.bag.length}/{s.bagMax} · Camp {s.camp.filter(Boolean).length}/{s.camp.length} · +{world.campYield} scrap / 15s · 🟢 {world.count('snare')}{speed > 1 && <b className="gr-fast"> · ×{speed}</b>}</div>
 
+      <div className="gr-body">
+      {desktop && (
+        <main className="gr-main gr-left">
+          <WildsView w={world} now={now} engage={engage} act={act} />
+        </main>
+      )}
+      <div className="gr-pane">
+      {desktop && navEl}
       <main className="gr-main">
         {tip && <div className="gr-tip"><p>💡 {tip.text}</p><button onClick={() => closeTip(tip.id)}>Got it</button></div>}
-        {tab === 'wilds' && <WildsView w={world} now={now} engage={engage} act={act} />}
-        {tab === 'camp' && <CampView w={world} act={act} now={now} />}
-        {tab === 'bag' && <BagView w={world} act={act} now={now} />}
-        {tab === 'fight' && <FightView w={world} act={act} now={now} />}
-        {tab === 'shop' && <ShopView w={world} act={act} now={now} />}
-        {tab === 'ship' && <ShipView w={world} act={act} now={now} onSignal={() => { setTab('wilds'); setToast('📡 Signal sent! A new trip begins, and the robots are tougher now.'); }} />}
-        {tab === 'guide' && <GuideView w={world} act={act} now={now} onGo={() => setTab('wilds')} />}
+        {pane === 'wilds' && <WildsView w={world} now={now} engage={engage} act={act} />}
+        {pane === 'camp' && <CampView w={world} act={act} now={now} />}
+        {pane === 'bag' && <BagView w={world} act={act} now={now} />}
+        {pane === 'fight' && <FightView w={world} act={act} now={now} />}
+        {pane === 'shop' && <ShopView w={world} act={act} now={now} />}
+        {pane === 'ship' && <ShipView w={world} act={act} now={now} onSignal={() => { setTab('wilds'); setToast('📡 Signal sent! A new trip begins, and the robots are tougher now.'); }} />}
+        {pane === 'guide' && <GuideView w={world} act={act} now={now} onGo={() => setTab('wilds')} />}
       </main>
+      </div>
+      </div>
 
-      <nav className="gr-tabs">
-        {TABS.map(t => (
-          <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => { setTab(t.id); setToast(null); }}>
-            <span className="gr-ti">{t.icon}</span><span>{t.label}</span>
-            {t.id === 'wilds' && tab !== 'wilds' && world.here.length > 0 && <i className="gr-count">{world.here.length}</i>}
-            {t.id === 'bag' && readyToEvolve && <i className="gr-dot gold" />}
-            {t.id === 'camp' && s.eggs.some(e => e.left <= 0) && <i className="gr-dot gold" />}
-            {t.id === 'guide' && HUNTS.some(h => world.huntState(h, now) === 'ready') && <i className="gr-dot gold" />}
-            {t.id === 'fight' && (s.fight || s.wreck) && <i className={`gr-dot ${s.wreck ? 'gold' : 'red'}`} />}
-          </button>
-        ))}
-      </nav>
+      {!desktop && navEl}
+
 
       {toast && !evolving && !hatched && !bossWin && !encOpen && <div className="gr-toast" onClick={() => setToast(null)}>{toast}</div>}
 
@@ -261,8 +288,18 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
             <button className="gr-row-btn" onClick={() => { setSound(!soundOn()); if (soundOn()) sfx.caught(); redraw(); }}>{soundOn() ? '🔊 Sound: on' : '🔇 Sound: off'}</button>
             <button className="gr-row-btn" onClick={() => { s.tips = {}; save(); setMenu(null); redraw(); }}>Show the tips again</button>
             {dev && <button className="gr-row-btn" onClick={() => setMenu('dev')}>🛠 Test tools</button>}
-            <button className="gr-row-btn bad" onClick={startOver}>Start over</button>
+            <button className="gr-row-btn bad" onClick={() => setMenu('reset')}>🔄 Start over (erase progress)</button>
             <p className="gr-ver">Greebles v{pkg.version}</p>
+          </div>
+        </div>
+      )}
+      {menu === 'reset' && (
+        <div className="gr-sheet-back" onClick={() => setMenu(null)}>
+          <div className="gr-sheet gr-reset" onClick={e => e.stopPropagation()}>
+            <div className="gr-sheet-h"><b>🔄 Start over?</b><button onClick={() => setMenu(null)}>✕</button></div>
+            <p>This erases <b>everything</b> on every device: your {s.bag.length} Greeble{s.bag.length === 1 ? '' : 's'}, {n(s.scrap)} scrap, items, eggs, the Field Guide ({Object.keys(s.caught).length} caught), hunts, ship parts and permanent Signal perks. (Sound setting is kept.)</p>
+            <p className="gr-dim">You'll start fresh at the crash site with the walkthrough. This can't be undone.</p>
+            <ResetConfirm onYes={startOver} onNo={() => setMenu(null)} />
           </div>
         </div>
       )}
@@ -287,6 +324,21 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Two-step erase: tap once to arm, then a 2-second wait before "Erase everything" works (no accidents). */
+function ResetConfirm({ onYes, onNo }: { onYes: () => void; onNo: () => void }) {
+  const [armed, setArmed] = useState(false);
+  const [ready, setReady] = useState(false);
+  useEffect(() => { if (!armed) return; const t = setTimeout(() => setReady(true), 2000); return () => clearTimeout(t); }, [armed]);
+  return (
+    <div className="gr-btns">
+      <button className="gr-btn" onClick={onNo}>Keep playing</button>
+      {!armed
+        ? <button className="gr-btn bad" onClick={() => setArmed(true)}>Start over…</button>
+        : <button className="gr-btn bad solid" disabled={!ready} onClick={onYes}>{ready ? 'Erase everything' : 'Are you sure?'}</button>}
     </div>
   );
 }
@@ -480,7 +532,7 @@ function CampView({ w, act, now }: V & { now: number }) {
         {s.camp.map((u, i) => { const g = u ? w.get(u) : undefined; return g
           ? <Row key={i} g={g} w={w} right={<div className="gr-btns col">{jobTag(g)}<button className="gr-btn" onClick={() => act(w.bench(i))}>Bench</button></div>} />
           : null; })}
-        {s.camp.some(u => !u) && <div className="gr-row empty">{s.camp.filter(u => !u).length} empty camp spot{s.camp.filter(u => !u).length > 1 ? 's' : ''}. Send Greebles from your bag below ↓</div>}
+        {s.camp.some(u => !u) && <div className="gr-row empty">{s.camp.filter(u => !u).length} empty camp spot{s.camp.filter(u => !u).length > 1 ? 's' : ''}. Send Greebles in from “Send from bag” further down.</div>}
       </section>
       <NestCard w={w} act={act} now={now} />
       <section className="gr-card">

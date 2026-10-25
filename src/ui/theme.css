@@ -350,3 +350,78 @@ button:disabled { cursor: default; opacity: .45; }
 .gr-tabs button { color: #a6aec8; }
 .gr-toast { top: calc(96px + var(--safe-t, 0px)) !important; bottom: auto !important; }
 .gr-task .gr-bar > div { transition: none; }
+
+/* 0.10: Start over sheet */
+.gr-reset p { text-align: left; font-size: 14px; margin: 6px 0 10px; }
+.gr-btn.bad { color: #ffb4b4; border: 1px solid #7a3a3a; background: #3a2226; }
+.gr-btn.bad.solid { background: #b33a3a; color: #fff; border-color: #d65a5a; }
+.gr-btn.bad.solid:disabled { background: #5a2a2e; color: #e6c0c0; opacity: 1; }
+
+/* 0.10: Desktop view (≥1000px wide): Wilds on the left, other tabs on the right, tabs on top */
+.gr-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.gr-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.gr-app.desk { max-width: 1400px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+.gr-app.desk .gr-body { flex-direction: row; }
+.gr-app.desk .gr-left { flex: 0 0 46%; max-width: 640px; border-right: 1px solid var(--line); padding: 16px 16px 24px; }
+.gr-app.desk .gr-pane { flex: 1; }
+.gr-app.desk .gr-pane .gr-main { padding: 16px 20px 24px; }
+.gr-app.desk .gr-left .gr-wilds { height: min(56vh, 520px); }
+.gr-app.desk .gr-left .gr-spawn .gr-badge { transform: scale(1.15); }
+.gr-app.desk .gr-tabs.desk { grid-template-columns: repeat(6, 1fr); border-top: 0; border-bottom: 1px solid var(--line); padding: 6px 8px; }
+.gr-app.desk .gr-tabs.desk button { flex-direction: row; justify-content: center; gap: 8px; font-size: 14px; padding: 10px 4px; border-radius: 10px; }
+.gr-app.desk .gr-tabs.desk button.on { background: #26324a; }
+.gr-app.desk .gr-tabs.desk .gr-ti { font-size: 18px; }
+.gr-app.desk .gr-top { padding-right: 70px; }
+.gr-app.desk .gr-guide { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+.gr-app.desk .gr-team { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+.gr-app.desk .gr-toast { top: 120px !important; }
+.gr-app.desk .gr-intro.coach { bottom: auto; top: 140px; }
+.gr-app.desk .gr-intro.coach.top { top: 140px; }
+@media (min-width: 1600px) {
+  .gr-app.desk { font-size: 16px; }
+  .gr-app.desk .gr-left { max-width: 720px; }
+}
+/* the catch screen stays a centered phone-size panel on desktop */
+.gr-app.desk .gr-enc { left: 50%; right: auto; width: min(560px, 100%); transform: translateX(-50%); border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+
+/* 0.10: glass + void art is bright now: same shade as the other areas */
+.gr-wilds.reg-glass .gr-wilds-shade, .gr-wilds.reg-void .gr-wilds-shade { background: linear-gradient(rgba(10,14,24,.38), rgba(10,14,24,.28) 40%, rgba(10,14,24,.5)) !important; }
+
+/* 0.10 desktop polish */
+.gr-app.desk { font-size: 16px; }
+.gr-app.desk .gr-sub { font-size: 13px; padding: 8px 20px; }
+.gr-app.desk .gr-title b { font-size: 19px; }
+.gr-app.desk .gr-title span { font-size: 13px; }
+.gr-app.desk .gr-left { flex: 0 0 42%; max-width: 600px; }
+.gr-app.desk .gr-region { padding: 8px 2px !important; font-size: 13px; }
+.gr-app.desk .gr-region small { font-size: 11.5px !important; }
+.gr-app.desk .gr-dim { font-size: 14px; }
+.gr-app.desk .gr-dim.small { font-size: 13px; }
+.gr-app.desk .gr-card { padding: 16px; border-radius: 14px; }
+.gr-app.desk .gr-card h2 { font-size: 17px; }
+.gr-app.desk .gr-row { min-height: 64px; }
+.gr-app.desk .gr-row .gr-badge { transform: scale(1.12); }
+/* right pane: readable width, never a stretched phone row */
+.gr-app.desk .gr-pane .gr-main > * { max-width: 880px; margin-left: auto; margin-right: auto; }
+.gr-app.desk .gr-pane .gr-main > .gr-card, .gr-app.desk .gr-pane .gr-main > section { width: 100%; }
+.gr-app.desk .gr-tabs.desk { max-width: 100%; }
+.gr-app.desk .gr-team { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.gr-app.desk .gr-guide { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+.gr-app.desk .gr-nest-row, .gr-app.desk .gr-eggs { justify-content: flex-start; gap: 14px; }
+/* very wide screens: cards flow in two columns */
+@media (min-width: 1700px) {
+  .gr-app.desk .gr-pane .gr-main { columns: 2 440px; column-gap: 16px; }
+  .gr-app.desk .gr-pane .gr-main > * { max-width: none; break-inside: avoid; display: inline-block; width: 100%; }
+}
+/* reset sheet buttons */
+.gr-reset .gr-btns { gap: 14px; justify-content: flex-end; margin-top: 6px; }
+.gr-reset .gr-btns .gr-btn { min-width: 140px; padding: 10px 16px; }
+.gr-reset .gr-btns .gr-btn:not(.bad) { background: #3b4a66; color: #fff; border: 1px solid #5a6c90; }
+.gr-sheet-back:has(.gr-reset) { background: rgba(0,0,0,.78); }
+
+/* 0.10: lighter shade so the bright art reads; creatures get a soft dark halo instead */
+.gr-wilds.reg-glass .gr-wilds-shade, .gr-wilds.reg-void .gr-wilds-shade { background: linear-gradient(rgba(10,14,24,.22), rgba(10,14,24,.12) 45%, rgba(10,14,24,.38)) !important; }
+.gr-wilds .gr-spawn .gr-badge.art img, .gr-wilds .gr-spawn img { filter: drop-shadow(0 0 3px rgba(10,12,24,.85)) drop-shadow(0 3px 5px rgba(0,0,0,.45)); }
+.gr-app.desk .gr-team .gr-pick, .gr-app.desk .gr-team button { font-size: 13px; }
+.gr-app.desk .gr-team .gr-badge { transform: scale(1.25); margin: 6px 0; }
+.gr-nest .gr-empty, .gr-nest p.gr-dim:last-child { text-align: center; }

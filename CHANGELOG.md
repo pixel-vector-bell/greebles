@@ -1,5 +1,10 @@
 # Greebles — What's New
 
+## 0.10.0 — Desktop view, Start over & new backgrounds
+- 🖥️ Desktop view: on a PC or a wide tablet, the Wilds stay on the left all the time while you use the other tabs on the right. Tabs move to the top, text is bigger, and the catch screen opens as a centered panel. Phones look the same as before.
+- 🔄 Start over: Settings → "Start over (erase progress)". It shows exactly what you'd lose, then needs a second tap after a 2-second wait, so you can't do it by accident. It wipes the save on every device, and the walkthrough starts again.
+- 🎨 New painted backgrounds for Glass Spires (a bright crystal valley) and the Void Rift (a pastel purple plain), so all 5 areas match now. Greebles get a soft outline so they stand out on every background.
+
 ## 0.9.0 — Eggs, daily tasks & a fresh look
 - 🪺 Nest & eggs (Camp tab): put two Greebles from the same family in the nest and they lay an egg about every 2 hours, even while you're away. Eggs hatch over time, and every Greeble you catch warms them by 10 minutes. Eggs often have more stars, and they're 3× more likely to be ✨ Prismatic (9× if a parent is Prismatic). The incubator holds 3 eggs.
 - 📋 Daily tasks (Wilds tab): 3 small goals every day, like "Catch 4 Tide Greebles" or "Land 3 Perfect throws". Each one pays scrap and Good Snares, and finishing all 3 gives a bonus of 2 Great Snares and a Shiny Bait.
