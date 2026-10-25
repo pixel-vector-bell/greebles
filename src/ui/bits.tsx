@@ -1,10 +1,25 @@
+import { useState } from 'react';
 import { ELEMENTS, type Element, type Morph } from '../sim/content';
 
+/** Art lives next to index.html in art/<id>.webp; if a picture is missing we fall back to the old shape. */
+export const artUrl = (id: string) => `./art/${id}.webp`;
+
 export function Badge({ m, size = 40, prism = false }: { m: Morph; size?: number; prism?: boolean }) {
+  const [broken, setBroken] = useState(false);
   return (
-    <div className={`gr-badge r-${m.rarity} ${prism ? 'prism' : ''}`}
-      style={{ background: prism ? undefined : m.color, width: size, height: size, fontSize: size * 0.48 }}>
-      {m.mark}
+    <div className={`gr-badge r-${m.rarity} ${prism ? 'prism' : ''} ${broken ? '' : 'art'}`}
+      style={{ background: prism ? undefined : broken ? m.color : undefined, width: size, height: size, fontSize: size * 0.48 }}>
+      {broken ? m.mark : <img src={artUrl(m.id)} alt="" draggable={false} onError={() => setBroken(true)} />}
+    </div>
+  );
+}
+
+/** Boss robot art (art/boss_<area>.webp), emoji fallback. */
+export function BossArt({ reg, size = 44 }: { reg: string; size?: number }) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <div className="gr-badge robot boss art" style={{ width: size, height: size }}>
+      {broken ? '🦾' : <img src={artUrl(`boss_${reg}`)} alt="" draggable={false} onError={() => setBroken(true)} />}
     </div>
   );
 }

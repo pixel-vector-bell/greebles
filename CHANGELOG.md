@@ -1,5 +1,10 @@
 # Greebles — What's New
 
+## 0.7.0 — Real Greeble art
+- Every Greeble now has its own picture! All 60 kinds got cut-out sticker art that sits nicely on the dark screens, plus the 4 robot bosses.
+- ✨ Prismatic Greebles look special now: a rainbow ring, colors that shift, and a sparkle that sweeps across them.
+- The Ash element has a new icon (🌋).
+
 ## 0.6.0 — The long game
 - Your ship! A new 🚀 Ship tab. Fix your crashed ship in 5 steps (hull, engine, fuel, antenna and nav core). Each step costs scrap and materials, and the later ones need you to beat the bosses.
 - Signal home: once the ship is fixed, call home to start a new trip. You keep your Field Guide, Prismatic marks, perks and 3 Greebles of your choice (at half level). Everything else starts fresh, and the robots get tougher each trip, but they pay more too.

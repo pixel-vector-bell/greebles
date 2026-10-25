@@ -242,3 +242,22 @@ button:disabled { cursor: default; opacity: .45; }
 .gr-spawn.src-lure .gr-badge { outline: 2px dashed #7aff9a; outline-offset: 3px; }
 .gr-cost { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: #c8d2de; margin-top: 2px; }
 .gr-shipcard { border-color: #4c6fff; }
+
+/* ── 0.7: real art ───────────────────────────────────────── */
+.gr-badge.art { overflow: visible; padding: 0; background: radial-gradient(circle at 50% 60%, rgba(255,255,255,.10), rgba(255,255,255,.02) 70%) !important; }
+.gr-badge.art img { width: 112%; height: 112%; margin: -6%; object-fit: contain; display: block; pointer-events: none; filter: drop-shadow(0 2px 2px rgba(0,0,0,.45)); }
+.gr-badge.prism.art img { mix-blend-mode: normal; filter: saturate(1.4) hue-rotate(var(--prism-hue, 0deg)); }
+.gr-badge.prism.art { padding: 3px; }
+.gr-badge.prism.art img { border-radius: inherit; }
+.gr-enc-body .gr-badge.art { background: radial-gradient(circle, rgba(255,255,255,.18), transparent 70%) !important; }
+.gr-gitem.unk .gr-badge { background: #2a3544; }
+.gr-boss-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.gr-boss-head h2 { margin: 0; }
+/* Prismatic: rainbow ring + colour-cycling art + sparkle sweep */
+.gr-badge.prism.art { padding: 3px; background: conic-gradient(from 0deg, #ff7ad9, #ffd36e, #7affc1, #74c7ff, #b88cff, #ff7ad9) !important; animation: gr-spin-bg 3s linear infinite; position: relative; }
+.gr-badge.prism.art img { border-radius: inherit; animation: gr-prism-art 4s linear infinite; }
+.gr-badge.prism.art::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.65) 45%, transparent 60%); background-size: 250% 100%; animation: gr-sweep 2.2s ease-in-out infinite; }
+@keyframes gr-prism-art { 0% { filter: saturate(1.6) hue-rotate(0deg) brightness(1.1); } 100% { filter: saturate(1.6) hue-rotate(360deg) brightness(1.1); } }
+@keyframes gr-sweep { 0% { background-position: 150% 0; } 100% { background-position: -50% 0; } }
+@keyframes gr-spin-bg { to { filter: hue-rotate(360deg); } }

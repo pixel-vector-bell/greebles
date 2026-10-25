@@ -172,7 +172,7 @@ export const RECIPES: Recipe[] = [
 export type Element = 'ash' | 'tide' | 'ember' | 'moss' | 'glass' | 'rust' | 'storm' | 'void';
 export interface ElementDef { id: Element; name: string; icon: string; color: string; move: string }
 export const ELEMENTS: Record<Element, ElementDef> = {
-  ash: { id: 'ash', name: 'Ash', icon: '🌫️', color: '#9a8aa8', move: 'Cinder Cloud' },
+  ash: { id: 'ash', name: 'Ash', icon: '🌋', color: '#9a8aa8', move: 'Cinder Cloud' },
   tide: { id: 'tide', name: 'Tide', icon: '💧', color: '#4a9ad8', move: 'Riptide' },
   ember: { id: 'ember', name: 'Ember', icon: '🔥', color: '#e0602a', move: 'Flare Burst' },
   moss: { id: 'moss', name: 'Moss', icon: '🌿', color: '#6aa848', move: 'Vine Lash' },

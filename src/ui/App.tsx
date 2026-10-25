@@ -12,7 +12,7 @@ import { onHubFlush, sendToHub } from '../save/hub';
 import { devEnabled } from '../save/dev';
 import { WhatsNew } from './WhatsNew';
 import { Encounter } from './Encounter';
-import { Badge, El, Stars, fmtDur, fmtTime, n } from './bits';
+import { Badge, BossArt, El, Stars, fmtDur, fmtTime, n } from './bits';
 import pkg from '../../package.json';
 
 type Tab = 'wilds' | 'camp' | 'bag' | 'fight' | 'shop' | 'ship' | 'guide';
@@ -444,7 +444,7 @@ function FightView({ w, act, now }: V & { now: number }) {
     return (
       <section className={`gr-card ${f.kind === 'boss' ? 'gr-boss' : ''}`}>
         <h2>{f.kind === 'boss' ? `Boss: ${foe?.name}` : f.kind === 'wreck' ? 'Battle at the wreck' : 'Battle'} · {region(f.reg).icon} {region(f.reg).name}</h2>
-        <div className="gr-row"><div className={`gr-badge robot ${f.kind === 'boss' ? 'boss' : ''}`}>{f.kind === 'boss' ? '🦾' : '🤖'}</div><div className="gr-grow"><b>{foe?.name}</b> {foe && <El id={foe.el} />} · HP {n(Math.max(0, f.robotHp))}<div className="gr-hp bot"><div style={{ width: `${Math.max(0, (100 * f.robotHp) / f.robotMax)}%` }} /></div></div></div>
+        <div className="gr-row">{f.kind === 'boss' ? <BossArt reg={f.reg} /> : <div className="gr-badge robot">🤖</div>}<div className="gr-grow"><b>{foe?.name}</b> {foe && <El id={foe.el} />} · HP {n(Math.max(0, f.robotHp))}<div className="gr-hp bot"><div style={{ width: `${Math.max(0, (100 * f.robotHp) / f.robotMax)}%` }} /></div></div></div>
         <div className="gr-vs">VS</div>
         {f.team.map(x => { const g = w.get(x.u); if (!g) return null; const m = morph(g.sp); const el = elementOf(g.sp); const mult = foe ? typeMult(el, foe.el) : 1;
           const ready = x.charge >= MOVE_CHARGE; return (
@@ -475,7 +475,7 @@ function FightView({ w, act, now }: V & { now: number }) {
   return (
     <>
       <section className="gr-card gr-boss">
-        <h2>🦾 {reg.boss.name} <span className="gr-dim small">· boss of {reg.icon} {reg.name}</span></h2>
+        <div className="gr-boss-head"><BossArt reg={reg.id} size={64} /><h2>{reg.boss.name} <span className="gr-dim small">· boss of {reg.icon} {reg.name}</span></h2></div>
         <p className="gr-dim">HP {n(boss.hp)} · hits {boss.atk} · <El id={bossEl} long /> Strong against it: {(Object.keys(STRONG) as Element[]).filter(e => STRONG[e].includes(bossEl)).map(e => <El key={e} id={e} long />)}. Pick up to {TEAM_MAX} Greebles (Skirmish hit hardest).{s.bossBeaten[reg.id] ? ' Beat it again for more loot.' : ` Win to ${REGIONS[REGIONS.findIndex(r => r.id === reg.id) + 1] ? `open ${REGIONS[REGIONS.findIndex(r => r.id === reg.id) + 1].name} and ` : ''}call out ${morph(reg.legendary).name}, the Legendary of this area!`}</p>
         {now < bossReady ? <div className="gr-empty">Being rebuilt… back in {fmtTime(bossReady - now)}</div> : (<>
           <div className="gr-team">
