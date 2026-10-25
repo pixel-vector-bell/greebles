@@ -1,5 +1,12 @@
 # Greebles — What's New
 
+## 0.6.0 — The long game
+- Your ship! A new 🚀 Ship tab. Fix your crashed ship in 5 steps (hull, engine, fuel, antenna and nav core). Each step costs scrap and materials, and the later ones need you to beat the bosses.
+- Signal home: once the ship is fixed, call home to start a new trip. You keep your Field Guide, Prismatic marks, perks and 3 Greebles of your choice (at half level). Everything else starts fresh, and the robots get tougher each trip, but they pay more too.
+- Signal Points: every trip home earns points (more for kinds caught, boss wins and Prismatics). Spend them on 6 perks that last forever: better catch chance, more Prismatics, more camp scrap, a care package of snares, more Greebles waiting in the wilds, and longer away time.
+- Daily expedition: once a day, send one Greeble off for 4 hours. It comes back with a big pile of loot, and a rare Greeble follows it home.
+- Weekly swarm: each week one kind of Greeble shows up everywhere, in every area.
+
 ## 0.5.0 — Jobs & bait
 - Camp jobs: campers now bring things back. Dig Greebles find 🪨 Ore, Trawl Greebles pull in 🌱 Kelp, and Skirmish Greebles salvage ⚙️ Gears. Strong Dig Greebles in the Glass Spires sometimes find rare 🔷 Crystal. This keeps going while you're away.
 - Camp moves with you. Each area favours one caste: Dig in Ash Flats and Glass Spires, Trawl in Tide Pools, Skirmish in Rust Fields. Favoured campers (⭐) find things 1.5× more and earn 25% more scrap.

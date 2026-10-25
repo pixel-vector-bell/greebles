@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { World, newGame, migrate } from '../src/sim/world';
+import { SHIP_PARTS, PERKS, DAY_MS } from '../src/sim/content';
 import { ELEMENTS, FAMILIES, MORPHS, RECIPES, REGIONS, RULES, SPAWNABLE, STRONG, craterAt, elementOf, isNight, morph, stormAt, typeMult } from '../src/sim/content';
 
 const T0 = 1_800_000_000_000;
@@ -241,7 +242,7 @@ describe('saves', () => {
     const old = { scrap: 120, bag: [{ u: 'g1', sp: 'draug', lv: 12, xp: 5 }, { u: 'g2', sp: 'nulith', lv: 3, xp: 0 }, { u: 'g3', sp: 'gone', lv: 1 }],
       camp: ['g2', null, null, null], huntAt: 0, campCarry: 0, fight: null, seen: { draug: true }, stats: { caught: 2 }, lastSeen: T0, tips: { walk: true } };
     const s = migrate(old, T0);
-    expect(s.version).toBe(5);
+    expect(s.version).toBe(6);
     expect(s.region).toBe('ash'); expect(s.unlocked).toBe(1);
     expect(s.bag.map(g => g.sp)).toEqual(['draug', 'nulith']);
     expect(s.bag[0].stars).toBe(3);
@@ -283,7 +284,8 @@ describe('0.3: areas, bosses, camp upgrades', () => {
 
   it('only the area you are in spawns its kinds, at its level', () => {
     const w = fresh(); w.s.unlocked = 4; w.travel('glass');
-    for (let i = 0; i < 200; i++) { const x = w.addSpawn(T0, 'wild'); expect(REGIONS[3].kinds).toContain(x.sp); expect(x.lv).toBeGreaterThan(REGIONS[3].lvl); expect(x.reg).toBe('glass'); }
+    const swarm = w.swarmKind(T0).id;
+    for (let i = 0; i < 200; i++) { const x = w.addSpawn(T0, 'wild'); expect([...REGIONS[3].kinds, swarm]).toContain(x.sp); expect(x.lv).toBeGreaterThan(REGIONS[3].lvl); expect(x.reg).toBe('glass'); }
     expect(w.here.every(x => x.reg === 'glass')).toBe(true);
   });
 
@@ -460,5 +462,67 @@ describe('0.5: camp jobs, area favour, bait', () => {
     const t0 = w.count('treat');
     expect(w.craft(i).ok).toBe(true); expect(w.count('treat')).toBe(t0 + 2); expect(w.count('kelp')).toBe(0);
     expect(w.craft(i).ok).toBe(false);
+  });
+});
+
+describe('0.6: ship, signal home, perks, expeditions, swarm', () => {
+  const rich = (w: World) => { w.s.scrap = 1e7; for (const k of ['ore', 'kelp', 'gear', 'core', 'crystal'] as const) w.s.items[k] = 9999; };
+
+  it('ship parts go in order and need the right bosses', () => {
+    const w = fresh(); rich(w);
+    expect(w.buildPart('engine').ok).toBe(false);          // hull first
+    expect(w.buildPart('hull').ok).toBe(true);
+    expect(w.buildPart('engine').ok).toBe(false);          // needs the Tide Dredger
+    w.s.bossBeaten = { ash: T0, tide: T0, rust: T0, glass: T0 };
+    for (const p of SHIP_PARTS.slice(1)) expect(w.buildPart(p.id).ok).toBe(true);
+    expect(w.shipDone).toBe(true);
+  });
+
+  it('signal home keeps the guide, perks and 3 Greebles; resets the rest; robots get tougher', () => {
+    const w = fresh(); rich(w);
+    w.s.bossBeaten = { ash: T0, tide: T0, rust: T0, glass: T0 }; w.s.unlocked = 4;
+    for (const p of SHIP_PARTS) w.buildPart(p.id);
+    const keep = [give(w, 'draugoth', 30, 5), give(w, 'gleckor', 20, 4), give(w, 'nulith', 10), give(w, 'velm', 5)];
+    w.s.caught = { draugoth: true, gleckor: true, nulith: true, velm: true }; w.s.claimed = { c3: true };
+    const hpBefore = w.foe('drone', 'patrol')!.hp;
+    const reward = w.signalReward;
+    expect(w.signalHome(keep, T0).ok).toBe(true);
+    expect(w.s.signals).toBe(1); expect(w.s.sp).toBe(reward);
+    expect(w.s.bag.length).toBe(3); expect(w.s.bag[0].lv).toBe(15);
+    expect(w.s.caught.velm).toBe(true);                    // guide kept
+    expect(w.s.unlocked).toBe(1); expect(w.s.ship).toEqual({}); expect(w.s.scrap).toBe(RULES.startScrap);
+    expect(w.foe('drone', 'patrol')!.hp).toBeGreaterThan(hpBefore);
+    expect(w.s.bagMax).toBe(RULES.bagMax);                 // c3 gave snares, not bag
+  });
+
+  it('perks cost Signal Points and do things', () => {
+    const w = fresh(); w.s.sp = 10;
+    meet(w, 'zoln'); const c0 = w.catchChance('snare', 0); w.leaveEncounter();
+    expect(w.buyPerk('lucky').ok).toBe(true);
+    meet(w, 'zoln'); expect(w.catchChance('snare', 0)).toBeGreaterThan(c0); w.leaveEncounter();
+    expect(w.buyPerk('roam').ok).toBe(true); expect(w.ambientCap).toBe(RULES.ambientCap + 1);
+    expect(w.s.sp).toBe(8);
+    w.s.sp = 100; for (let i = 0; i < 10; i++) w.buyPerk('roam');
+    expect(w.perk('roam')).toBe(PERKS.find(p => p.id === 'roam')!.max);
+  });
+
+  it('one expedition a day; the Greeble comes back with loot and a rare friend', () => {
+    const w = fresh(); w.s.spawns = [];
+    const u = give(w, 'gleck', 20, 4);
+    const day = Math.floor(T0 / DAY_MS) * DAY_MS + DAY_MS + 1000;
+    expect(w.sendExpedition(u, day).ok).toBe(true);
+    expect(w.busy(u)).toBe(true);
+    expect(w.sendExpedition(give(w, 'velm'), day).ok).toBe(false);
+    w.s.wildClock = day; w.updateWilds(day + 4 * HOUR + 1000);
+    const back = w.drain().find(e => e.t === 'expoBack');
+    expect(back).toBeDefined(); expect(w.s.expo).toBeNull(); expect(w.count('ore')).toBeGreaterThan(0);
+    expect(w.sendExpedition(u, day + 5 * HOUR).ok).toBe(false);      // same day
+    expect(w.sendExpedition(u, day + DAY_MS).ok).toBe(true);         // next day
+  });
+
+  it('the weekly swarm kind is much more common', () => {
+    const w = fresh(3); const sw = w.swarmKind(T0).id;
+    let n = 0; for (let i = 0; i < 3000; i++) if (w.rollKind(T0).id === sw) n++;
+    expect(n / 3000).toBeGreaterThan(0.15);
   });
 });

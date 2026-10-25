@@ -304,6 +304,35 @@ export const UPGRADES: UpgradeDef[] = [
 ];
 export const PRESS_MS_PER_SNARE = 30 * 60 * 1000;  // per level: 1 snare / 30 min
 
+// ── 0.6: the long game ─────────────────────────────────────
+export type PartId = 'hull' | 'engine' | 'fuel' | 'antenna' | 'nav';
+export interface ShipPart { id: PartId; name: string; icon: string; desc: string; cost: Partial<Record<ItemId, number>>; scrap: number; needBoss?: RegionId }
+export const SHIP_PARTS: ShipPart[] = [
+  { id: 'hull', name: 'Patch the hull', icon: '🛡️', desc: 'Seal the cracks so the ship holds air.', cost: { ore: 60, gear: 40 }, scrap: 3000 },
+  { id: 'engine', name: 'Rebuild the engine', icon: '⚙️', desc: 'Needs parts from the Tide Dredger.', cost: { gear: 120, core: 6 }, scrap: 10000, needBoss: 'tide' },
+  { id: 'fuel', name: 'Brew fuel', icon: '🛢️', desc: 'Kelp makes surprisingly good rocket fuel.', cost: { kelp: 150, core: 8 }, scrap: 20000, needBoss: 'rust' },
+  { id: 'antenna', name: 'Raise the antenna', icon: '📡', desc: 'Crystal focuses the signal.', cost: { crystal: 10, gear: 150, core: 10 }, scrap: 40000, needBoss: 'glass' },
+  { id: 'nav', name: 'Fix the nav core', icon: '🧭', desc: 'The last piece. Then you can call home.', cost: { crystal: 20, core: 20 }, scrap: 80000, needBoss: 'glass' },
+];
+export type PerkId = 'lucky' | 'shine' | 'thrift' | 'pack' | 'roam' | 'watch';
+export interface PerkDef { id: PerkId; name: string; icon: string; desc: string; max: number }
+export const PERKS: PerkDef[] = [
+  { id: 'lucky', name: 'Lucky hands', icon: '🍀', desc: '+10% catch chance', max: 5 },
+  { id: 'shine', name: 'Shine sense', icon: '✨', desc: '+25% Prismatic odds', max: 4 },
+  { id: 'thrift', name: 'Scrapper', icon: '🔩', desc: '+20% scrap from camp', max: 5 },
+  { id: 'pack', name: 'Care package', icon: '📦', desc: 'Start each trip with +5 Good and +2 Great Snares', max: 3 },
+  { id: 'roam', name: 'Greeble magnet', icon: '🧲', desc: '+1 Greeble can wait in the wilds', max: 3 },
+  { id: 'watch', name: 'Night owl', icon: '🦉', desc: 'Camp earns +4 h longer while away', max: 3 },
+];
+/** Signal Points cost of the next level of a perk. */
+export const perkCost = (lv: number) => lv + 1;
+/** Each signal home makes the robots this much tougher — and pay this much more. */
+export const SIGNAL_STEP = 0.5;
+export const EXPEDITION_MS = 4 * 60 * 60 * 1000;
+export const DAY_MS = 24 * 60 * 60 * 1000;
+export const WEEK_MS = 7 * DAY_MS;
+export const SWARM_MULT = 8;
+
 const byId = new Map(MORPHS.map(m => [m.id, m]));
 export function morph(id: string): Morph {
   const m = byId.get(id);

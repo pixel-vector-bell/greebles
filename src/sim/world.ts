@@ -1,15 +1,16 @@
 import {
   BASE_POWER, CATCH_BASE, EVO_ITEMS, FLEE, ITEMS, MORPHS, REWARDS, RARITIES, ROBOTS, RULES, SELL, SNARE_MULT, SPAWNABLE,
   STAR_WEIGHTS, START_ITEMS, THROW_MULT, TIER_WEIGHT, TREAT_MULT, WILD_MAX_LV,
-  craterAt, hasMorph, isNight, morph, robot, stormAt, xpNeed,
+  craterAt, hash32, hasMorph, isNight, morph, robot, stormAt, xpNeed,
   REGIONS, BOSS_REMATCH_MS, TEAM_MAX, UPGRADES, PRESS_MS_PER_SNARE, region, regionIndex, robotIn,
   JOB, FAVOR_MULT, LURES, LURE_MS, LURE_SPAWN_MIN, LURE_SPAWN_MAX, type LureId,
+  SHIP_PARTS, PERKS, perkCost, SIGNAL_STEP, EXPEDITION_MS, DAY_MS, WEEK_MS, SWARM_MULT, type PartId, type PerkId,
   RECIPES, MOVE_AUTO, MOVE_AUTO_MULT, MOVE_CHARGE, MOVE_TAP_MULT, elementOf, typeMult, type Element,
   type Evo, type ItemId, type Morph, type Rarity, type RegionId, type Role, type SnareId, type UpgradeId,
 } from './content';
 import { nextRandom } from './rng';
 
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 
 export interface Greeble { u: string; sp: string; lv: number; xp: number; stars: number; prism: boolean; caughtAt?: number }
 export type SpawnSrc = 'wild' | 'crater' | 'beacon' | 'wreck' | 'mythic' | 'legend' | 'lure';
@@ -55,6 +56,18 @@ export interface GameState {
   pressCarry: number;
   /** Bait set out in an area: Greebles wander in fast for 30 min. */
   lure: { id: LureId; reg: RegionId; until: number; next: number } | null;
+  // ── 0.6: the long game (these survive a signal home) ──────
+  ship: Partial<Record<PartId, true>>;
+  /** How many times you've signalled home (each run is tougher and pays more). */
+  signals: number;
+  /** Signal Points to spend on perks. */
+  sp: number;
+  perks: Partial<Record<PerkId, number>>;
+  /** Daily expedition: who's out, and when they come back. */
+  expo: { u: string; until: number; reg: RegionId } | null;
+  expoDay: number;
+  /** Week number the swarm reward was claimed. */
+  bestEver: { caught: number; bosses: number };
   /** Materials brought back by campers (for the welcome-back card / stats). */
   gathered: Partial<Record<ItemId, number>>;
   /** Kinds met in the wilds (or owned). */
@@ -78,6 +91,7 @@ export function newGame(seed = (Math.random() * 2 ** 31) | 0, now = Date.now()):
     spawns: [], wildClock: now, nextAmbientAt: now + RULES.ambientMinMs, nextCraterAt: 0, nextBeaconAt: 0, beaconUntil: 0,
     wreck: null, nextWreckAt: now + RULES.wreckFirstMs, enc: null,
     region: 'ash', unlocked: 1, bossBeaten: {}, upgrades: {}, pressCarry: 0, lure: null, gathered: {},
+    ship: {}, signals: 0, sp: 0, perks: {}, expo: null, expoDay: 0, bestEver: { caught: 0, bosses: 0 },
     seen: {}, caught: {}, prismCaught: {}, claimed: {}, stats: freshStats(), lastSeen: now, tips: {},
   };
   // A few Greebles are already out there on day one.
@@ -106,6 +120,8 @@ export type GameEvent =
   | { t: 'move'; u: string; dmg: number; tapped: boolean; mult: number }
   | { t: 'crafted'; out: ItemId; n: number }
   | { t: 'lure'; id: LureId }
+  | { t: 'shipPart'; id: PartId; done: boolean }
+  | { t: 'expoBack'; sp: string; found: Partial<Record<ItemId, number>>; greeble?: string; prism: boolean }
   | { t: 'wreck'; robot: string }
   | { t: 'reward'; id: string; label: string }
   | { t: 'beacon' };
@@ -132,11 +148,20 @@ export class World {
   get(u: string) { return this.s.bag.find(g => g.u === u); }
   spawn(id: string) { return this.s.spawns.find(x => x.id === id); }
   inCamp(u: string) { return this.s.camp.includes(u); }
-  busy(u: string) { return this.inCamp(u) || this.fighting(u); }
+  busy(u: string) { return this.inCamp(u) || this.fighting(u) || this.s.expo?.u === u; }
+  perk(id: PerkId) { return this.s.perks[id] ?? 0; }
+  /** Robots get tougher each time you signal home (and pay more). */
+  get hard() { return 1 + this.s.signals * SIGNAL_STEP; }
+  get shipDone() { return SHIP_PARTS.every(p => this.s.ship[p.id]); }
+  /** Signal Points you'd get for signalling home now. */
+  get signalReward() { return 3 + Math.floor(this.caughtCount / 10) + this.s.stats.bosses + Object.keys(this.s.prismCaught).length; }
+  get ambientCap() { return RULES.ambientCap + this.perk('roam'); }
+  /** Swarm: one kind is everywhere for a whole week (same for everyone). */
+  swarmKind(t: number) { const pool = SPAWNABLE.filter(m => m.rarity !== 'mythic' && m.rarity !== 'legendary'); return pool[hash32(Math.floor(t / WEEK_MS) * 31 + 5) % pool.length]; }
   fighting(u: string) { return !!this.s.fight?.team.some(f => f.u === u); }
   get reg() { return region(this.s.region); }
   up(id: UpgradeId) { return this.s.upgrades[id] ?? 0; }
-  get offlineCap() { return RULES.offlineCapMs + this.up('away') * 4 * 60 * 60 * 1000; }
+  get offlineCap() { return RULES.offlineCapMs + (this.up('away') + this.perk('watch')) * 4 * 60 * 60 * 1000; }
   isOpen(id: RegionId) { return regionIndex(id) < this.s.unlocked; }
   bossReadyAt(id: RegionId) { const b = this.s.bossBeaten[id]; return b ? b + BOSS_REMATCH_MS : 0; }
   count(item: ItemId) { return this.s.items[item] ?? 0; }
@@ -144,7 +169,7 @@ export class World {
   quality(g: { stars: number; prism: boolean }) { return (1 + (g.stars - 1) * 0.1) * (g.prism ? 1.2 : 1); }
   power(g: Greeble) { const m = morph(g.sp); return Math.round((BASE_POWER[m.rarity] + (m.stage - 1) * 2 + g.lv + (m.role === 'fight' ? 2 : 0)) * this.quality(g)); }
   fighterHp(g: Greeble) { return 10 + this.power(g) * 2; }
-  yieldOf(g: Greeble) { const m = morph(g.sp); return Math.round((1 + Math.floor(g.lv / 4) + (m.stage - 1) + (m.role === 'fight' ? 1 : 0)) * this.quality(g) * (1 + this.up('bench') * 0.1) * (m.role === this.reg.favor ? 1.25 : 1) * 10) / 10; }
+  yieldOf(g: Greeble) { const m = morph(g.sp); return Math.round((1 + Math.floor(g.lv / 4) + (m.stage - 1) + (m.role === 'fight' ? 1 : 0)) * this.quality(g) * (1 + this.up('bench') * 0.1) * (m.role === this.reg.favor ? 1.25 : 1) * (1 + this.perk('thrift') * 0.2) * 10) / 10; }
   /** Bosses: everyone can help, but only Skirmish Greebles hit at full power. */
   teamPower(g: Greeble) { return Math.max(1, Math.round(this.power(g) * (morph(g.sp).role === 'fight' ? 1 : 0.6))); }
   sellValue(g: Greeble) { return Math.round(SELL[morph(g.sp).rarity] * g.lv * (g.prism ? 5 : 1)); }
@@ -189,10 +214,13 @@ export class World {
     if (this.s.bossBeaten[reg.id]) pool.push(morph(reg.legendary));
     const perTier = new Map<Rarity, number>();
     for (const m of pool) perTier.set(m.rarity, (perTier.get(m.rarity) ?? 0) + 1);
+    const swarm = this.swarmKind(t).id;
+    if (!pool.some(m => m.id === swarm)) pool.push(morph(swarm));   // the swarm kind shows up in every area
     const weights = pool.map(m => {
       let w = TIER_WEIGHT[m.rarity] / perTier.get(m.rarity)!;
       if (opts.rareBoost && RARITIES.indexOf(m.rarity) >= 2) w *= opts.rareBoost;
       if (opts.role && m.role === opts.role) w *= opts.roleMult ?? 4;
+      if (m.id === swarm) w *= SWARM_MULT;
       if (night && m.tags?.includes('night')) w *= 3;
       if (storm && m.tags?.includes('storm')) w *= 3;
       return w;
@@ -206,7 +234,7 @@ export class World {
     const lifeMs = life ?? (src === 'wild' ? RULES.ambientLifeMs : src === 'beacon' || src === 'lure' ? RULES.beaconLifeMs : src === 'wreck' ? RULES.wreckSpawnLifeMs : RULES.ambientLifeMs);
     const x: Spawn = {
       id: this.uid('w'), sp: m.id, lv: Math.min(RULES.maxLevel, 1 + Math.floor(this.rand() * WILD_MAX_LV[m.rarity]) + this.reg.lvl), stars: this.rollStars(),
-      prism: this.rand() < RULES.prismOdds * (opts.prismBoost ?? 1), src, at: t, until: t + lifeMs, x: 0, y: 0, reg: this.s.region,
+      prism: this.rand() < RULES.prismOdds * (opts.prismBoost ?? 1) * (1 + this.perk('shine') * 0.25), src, at: t, until: t + lifeMs, x: 0, y: 0, reg: this.s.region,
     };
     // spread them out so tiles don't sit on top of each other (best of a few tries)
     let best = { x: 0.5, y: 0.5, d: -1 };
@@ -239,12 +267,14 @@ export class World {
     const s = this.s;
     if (!(now > s.wildClock)) return;
     // Anything older than a few hours has wandered off anyway, so don't simulate a whole week.
+    if (s.expo && now >= s.expo.until && now - s.wildClock > RULES.wildSimMaxMs) this.expoReturn(now);
     if (now - s.wildClock > RULES.wildSimMaxMs) {
       s.wildClock = now - RULES.wildSimMaxMs;
       s.nextAmbientAt = Math.max(s.nextAmbientAt, s.wildClock);
       s.nextWreckAt = Math.max(Math.min(s.nextWreckAt, s.wildClock + RULES.wreckMaxMs), s.wildClock);
     }
     for (let t = s.wildClock + STEP; t <= now; t += STEP) this.wildStep(t);
+    if (s.expo && now >= s.expo.until) this.expoReturn(now);
     s.wildClock = now - ((now - s.wildClock) % STEP);
     this.expire(now);
   }
@@ -257,7 +287,7 @@ export class World {
     const s = this.s;
     this.expire(t);
     if (t >= s.nextAmbientAt) {
-      if (this.countSrc('wild') < RULES.ambientCap) this.addSpawn(t, 'wild');
+      if (this.countSrc('wild') < this.ambientCap) this.addSpawn(t, 'wild');
       s.nextAmbientAt = t + this.between(RULES.ambientMinMs, RULES.ambientMaxMs);
     }
     const c = craterAt(t);
@@ -314,6 +344,98 @@ export class World {
     return OK;
   }
 
+  // ── the ship, signalling home, expeditions ────────────────
+  canBuild(id: PartId): string | null {
+    const p = SHIP_PARTS.find(x => x.id === id); if (!p) return 'No such part.';
+    if (this.s.ship[id]) return 'Already done.';
+    const i = SHIP_PARTS.indexOf(p);
+    if (i > 0 && !this.s.ship[SHIP_PARTS[i - 1].id]) return `Do "${SHIP_PARTS[i - 1].name}" first.`;
+    if (p.needBoss && !this.s.bossBeaten[p.needBoss]) return `Beat the ${region(p.needBoss).boss.name} first.`;
+    if (this.s.scrap < p.scrap) return `Needs ${p.scrap.toLocaleString('en-US')} scrap.`;
+    const short = (Object.entries(p.cost) as [ItemId, number][]).find(([k, v]) => this.count(k) < v);
+    if (short) return `Needs ${short[1]} ${ITEMS[short[0]].name}.`;
+    return null;
+  }
+  buildPart(id: PartId): ActionResult {
+    const why = this.canBuild(id); if (why) return fail(why);
+    const p = SHIP_PARTS.find(x => x.id === id)!;
+    this.s.scrap -= p.scrap;
+    for (const [k, v] of Object.entries(p.cost) as [ItemId, number][]) this.s.items[k] = this.count(k) - v;
+    this.s.ship[id] = true;
+    this.emit({ t: 'shipPart', id, done: this.shipDone });
+    return OK;
+  }
+  /**
+   * Signal home: start a new trip on the planet. You keep your Field Guide, Prismatic marks, perks
+   * and up to 3 Greebles of your choice. Everything else resets, robots get tougher (and pay more),
+   * and you get Signal Points for perks.
+   */
+  signalHome(keep: string[], now: number): ActionResult {
+    if (!this.shipDone) return fail('Finish repairing the ship first.');
+    if (this.s.fight || this.s.enc) return fail('Finish what you are doing first.');
+    const kept = [...new Set(keep)].slice(0, 3).map(u => this.get(u)).filter(Boolean) as Greeble[];
+    const old = this.s;
+    const fresh = newGame(old.rng, now);
+    const pack = this.perk('pack');
+    const s: GameState = {
+      ...fresh,
+      nextId: old.nextId,
+      bag: kept.map(g => ({ ...g, lv: Math.max(1, Math.floor(g.lv / 2)), xp: 0 })),
+      seen: old.seen, caught: old.caught, prismCaught: old.prismCaught, claimed: old.claimed,
+      stats: { ...old.stats }, tips: old.tips,
+      signals: old.signals + 1, sp: old.sp + this.signalReward, perks: old.perks,
+      bestEver: { caught: Math.max(old.bestEver.caught, old.stats.caught), bosses: Math.max(old.bestEver.bosses, old.stats.bosses) },
+      expoDay: old.expoDay,
+    };
+    s.items = { ...s.items, good: (s.items.good ?? 0) + pack * 5, great: (s.items.great ?? 0) + pack * 2 };
+    // the Field Guide rewards you already claimed stay claimed, but the bag/camp they gave come back too
+    for (const r of REWARDS) if (old.claimed[r.id]) {
+      if (r.give.bag) s.bagMax += r.give.bag;
+      if (r.give.camp) for (let i = 0; i < r.give.camp; i++) if (s.camp.length < RULES.maxCampSlots) s.camp.push(null);
+    }
+    this.s = s;
+    return OK;
+  }
+  buyPerk(id: PerkId): ActionResult {
+    const d = PERKS.find(p => p.id === id); if (!d) return fail('No such perk.');
+    const lv = this.perk(id);
+    if (lv >= d.max) return fail('Maxed out.');
+    const c = perkCost(lv);
+    if (this.s.sp < c) return fail(`Needs ${c} Signal Points.`);
+    this.s.sp -= c;
+    this.s.perks[id] = lv + 1;
+    return OK;
+  }
+  /** One expedition a day: send a Greeble off for 4 hours; it comes back with loot (and maybe a friend). */
+  expoReady(now: number) { return !this.s.expo && Math.floor(now / DAY_MS) > this.s.expoDay; }
+  sendExpedition(u: string, now: number): ActionResult {
+    const g = this.get(u); if (!g) return fail('Pick a Greeble.');
+    if (this.s.expo) return fail('Someone is already out exploring.');
+    if (!this.expoReady(now)) return fail('One expedition a day. Come back tomorrow!');
+    if (this.busy(u)) return fail('It is busy.');
+    this.s.expo = { u, until: now + EXPEDITION_MS, reg: this.s.region };
+    this.s.expoDay = Math.floor(now / DAY_MS);
+    return OK;
+  }
+  private expoReturn(t: number) {
+    const e = this.s.expo!; const g = this.get(e.u);
+    this.s.expo = null;
+    if (!g) return;
+    const ri = regionIndex(e.reg), q = this.quality(g), lvl = 1 + g.lv / 20;
+    const found: Partial<Record<ItemId, number>> = {};
+    const add = (k: ItemId, n: number) => { if (n > 0) { found[k] = (found[k] ?? 0) + n; this.give(k, n); } };
+    add('ore', Math.round((10 + ri * 8) * q * lvl)); add('kelp', Math.round((10 + ri * 8) * q * lvl)); add('gear', Math.round((6 + ri * 6) * q * lvl));
+    add('core', ri + (this.rand() < 0.5 ? 1 : 0)); add('great', 2 + ri); add('treat', 3);
+    if (ri >= 3) add('crystal', 2 + Math.floor(this.rand() * 3));
+    if (this.rand() < 0.3) add('lureRare', 1);
+    this.addXp(g, 200 + ri * 150);
+    // a rare friend follows it home and waits in the wilds of that area
+    const reg0 = this.s.region; this.s.region = e.reg;
+    const friend = this.addSpawn(t, 'wild', undefined, 2 * 60 * 60_000, { rareBoost: 4, prismBoost: 2 });
+    this.s.region = reg0;
+    this.emit({ t: 'expoBack', sp: g.sp, found, greeble: friend.sp, prism: friend.prism });
+  }
+
   // ── catching ──────────────────────────────────────────────
   startEncounter(id: string): ActionResult {
     const x = this.spawn(id); if (!x) return fail('It wandered off.');
@@ -338,7 +460,7 @@ export class World {
     if (snare === 'star') return 1;
     const m = morph(x.sp);
     const lvPenalty = 1 - Math.min(0.3, (x.lv - 1) * 0.012);
-    return Math.min(0.97, CATCH_BASE[m.rarity] * SNARE_MULT[snare] * THROW_MULT[Math.max(0, Math.min(3, quality | 0))] * (e!.treat ? TREAT_MULT : 1) * lvPenalty);
+    return Math.min(0.97, CATCH_BASE[m.rarity] * SNARE_MULT[snare] * THROW_MULT[Math.max(0, Math.min(3, quality | 0))] * (e!.treat ? TREAT_MULT : 1) * lvPenalty * (1 + this.perk('lucky') * 0.1));
   }
   /** Throw a snare. `quality` 0-3 = okay / Nice / Great / Perfect (from the throw ring). */
   throwSnare(snare: SnareId, quality: number): ActionResult {
@@ -464,11 +586,12 @@ export class World {
   /** Robot stats for a fight in the current area. */
   foe(robotId: string, kind: FightKind): { name: string; hp: number; atk: number; xp: number; scrap: number; el: Element; tier: number } | null {
     const reg = this.reg;
-    if (kind === 'boss') return { name: reg.boss.name, hp: reg.boss.hp, atk: reg.boss.atk, xp: reg.boss.xp, scrap: reg.boss.scrap, el: reg.boss.el, tier: 3 };
+    const h = this.hard;
+    if (kind === 'boss') return { name: reg.boss.name, hp: Math.round(reg.boss.hp * h), atk: Math.round(reg.boss.atk * Math.sqrt(h)), xp: reg.boss.xp, scrap: Math.round(reg.boss.scrap * h), el: reg.boss.el, tier: 3 };
     const r = robot(robotId); if (!r) return null;
     const st = robotIn(r, reg);
     const wreck = kind === 'wreck' ? RULES.wreckHpMult : 1;
-    return { name: r.name, hp: Math.round(st.hp * wreck), atk: st.atk, xp: st.xp, scrap: Math.round((4 + ROBOTS.indexOf(r) * 6) * reg.mult), el: r.el, tier: ROBOTS.indexOf(r) };
+    return { name: r.name, hp: Math.round(st.hp * wreck * h), atk: Math.round(st.atk * Math.sqrt(h)), xp: st.xp, scrap: Math.round((4 + ROBOTS.indexOf(r) * 6) * reg.mult * h), el: r.el, tier: ROBOTS.indexOf(r) };
   }
   /** One normal hit from this Greeble on this robot (element-aware). Skirmish hit full, other castes 60%. */
   hitOn(g: Greeble, el: Element) { return Math.max(1, Math.round(this.teamPower(g) * typeMult(elementOf(g.sp), el))); }
@@ -569,7 +692,7 @@ export class World {
       if (f.kind === 'boss' ? true : this.rand() < [0.02, 0.06, 0.15][foe.tier] + (f.kind === 'wreck' ? 0.1 : 0)) add('core', f.kind === 'boss' ? 1 + ri : 1);
       if (f.kind === 'boss') {
         const reg = region(f.reg); const first = !this.s.bossBeaten[f.reg];
-        const scrap = reg.boss.scrap * (first ? 1 : 0.5);
+        const scrap = Math.round(foe.scrap * (first ? 1 : 0.5));
         this.earn(scrap);
         this.s.bossBeaten[f.reg] = now;
         this.s.stats.bosses++;
@@ -691,7 +814,7 @@ export class World {
   }
 }
 
-/** Old (0.1 - 0.4) or hand-edited saves are cleaned up here so a bad blob can never crash the game. */
+/** Old (0.1 - 0.5) or hand-edited saves are cleaned up here so a bad blob can never crash the game. */
 export function migrate(raw: any, now = Date.now()): GameState {
   const fresh = newGame(undefined, now);
   if (!raw || typeof raw !== 'object') return fresh;
@@ -755,6 +878,12 @@ export function migrate(raw: any, now = Date.now()): GameState {
   return {
     region: reg, unlocked, bossBeaten, upgrades, pressCarry: Math.max(0, num(raw.pressCarry, 0)),
     lure: raw.lure && LURES[raw.lure.id as LureId] && regIds.includes(raw.lure.reg) ? { id: raw.lure.id, reg: raw.lure.reg, until: num(raw.lure.until, 0), next: num(raw.lure.next, 0) } : null,
+    ship: Object.fromEntries(SHIP_PARTS.filter(p => raw.ship?.[p.id] === true).map(p => [p.id, true])) as Partial<Record<PartId, true>>,
+    signals: Math.max(0, num(raw.signals, 0) | 0), sp: Math.max(0, num(raw.sp, 0) | 0),
+    perks: Object.fromEntries(PERKS.map(p => [p.id, Math.min(p.max, Math.max(0, num(raw.perks?.[p.id], 0) | 0))]).filter(([, v]) => v)) as Partial<Record<PerkId, number>>,
+    expo: raw.expo && ids.has(raw.expo.u) && regIds.includes(raw.expo.reg) ? { u: raw.expo.u, until: num(raw.expo.until, 0), reg: raw.expo.reg } : null,
+    expoDay: Math.max(0, num(raw.expoDay, 0) | 0),
+    bestEver: { caught: Math.max(0, num(raw.bestEver?.caught, 0)), bosses: Math.max(0, num(raw.bestEver?.bosses, 0)) },
     gathered: Object.fromEntries(Object.entries(raw.gathered ?? {}).filter(([k, v]) => k in ITEMS && typeof v === 'number' && v >= 0)) as Partial<Record<ItemId, number>>,
     version: SAVE_VERSION,
     rng: num(raw.rng, fresh.rng) | 0,

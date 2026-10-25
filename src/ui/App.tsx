@@ -4,7 +4,7 @@ import {
   FAMILIES, ITEMS, MORPHS, RARITY_LABEL, REWARDS, ROBOTS, RULES, SNARES, craterAt, isNight, morph, roleLabel, stormAt, untilFlip, xpNeed,
   REGIONS, TEAM_MAX, UPGRADES, region, robotIn,
   ELEMENTS, MOVE_AUTO, MOVE_CHARGE, RECIPES, STRONG, elementOf, typeMult,
-  LURES,
+  LURES, SHIP_PARTS, PERKS, perkCost, EXPEDITION_MS, DAY_MS, WEEK_MS,
   type Element, type ItemId, type LureId, type RegionId,
 } from '../sim/content';
 import { saveLocal, wipeLocal } from '../save/storage';
@@ -15,11 +15,11 @@ import { Encounter } from './Encounter';
 import { Badge, El, Stars, fmtDur, fmtTime, n } from './bits';
 import pkg from '../../package.json';
 
-type Tab = 'wilds' | 'camp' | 'bag' | 'fight' | 'shop' | 'guide';
+type Tab = 'wilds' | 'camp' | 'bag' | 'fight' | 'shop' | 'ship' | 'guide';
 const TABS: { id: Tab; icon: string; label: string }[] = [
   { id: 'wilds', icon: '🌿', label: 'Wilds' }, { id: 'camp', icon: '⛺', label: 'Camp' },
   { id: 'bag', icon: '🎒', label: 'Bag' }, { id: 'fight', icon: '⚔️', label: 'Fight' },
-  { id: 'shop', icon: '🛒', label: 'Shop' }, { id: 'guide', icon: '📖', label: 'Guide' },
+  { id: 'shop', icon: '🛒', label: 'Shop' }, { id: 'ship', icon: '🚀', label: 'Ship' }, { id: 'guide', icon: '📖', label: 'Guide' },
 ];
 
 function message(e: GameEvent, w: World): string | null {
@@ -36,6 +36,8 @@ function message(e: GameEvent, w: World): string | null {
     case 'wreck': return `🤖 A robot is guarding a wreck. Beat it on the Fight tab for a burst of Greebles!`;
     case 'reward': return `📖 Guide reward: ${e.label}!`;
     case 'beacon': return '🛰️ Beacon on! Greebles will wander in fast for 30 minutes.';
+    case 'shipPart': return e.done ? '🚀 The ship is fixed! You can signal home now.' : `🔧 Ship repair done: ${SHIP_PARTS.find(p => p.id === e.id)?.name}.`;
+    case 'expoBack': return `🧭 Your ${morph(e.sp).name} is back from its expedition with loot${e.greeble ? `, and a ${e.prism ? '✨ PRISMATIC ' : ''}${morph(e.greeble).name} followed it home!` : '!'}`;
     case 'lure': return `🪤 ${ITEMS[e.id].name} is out! Greebles will wander in for 30 minutes.`;
     case 'crafted': return `🔨 Made ${e.n} ${ITEMS[e.out].name}${e.n > 1 ? 's' : ''}.`;
     case 'move': { const g = w.get(e.u); return g ? `${ELEMENTS[elementOf(g.sp)].icon} ${ELEMENTS[elementOf(g.sp)].move}! ${n(e.dmg)} damage${e.mult > 1 ? ' — super strong!' : ''}` : null; }
@@ -50,6 +52,7 @@ const TIPS: { id: string; tab: Tab; text: string }[] = [
   { id: 'bag', tab: 'bag', text: 'Greebles evolve when they reach the right level (some need an item, or night time). Graft a copy in for a big level jump and a chance at more stars.' },
   { id: 'fight', tab: 'fight', text: 'Any Greeble can fight robots now (Skirmish hit hardest). Pick the right element for a 1.5× hit, and tap a Greeble\'s move when it glows!' },
   { id: 'boss', tab: 'fight', text: 'Each area has a robot boss. Beat it with a team of up to 3 to open the next area and call out its Legendary Greeble!' },
+  { id: 'ship', tab: 'ship', text: 'Fix your ship piece by piece. When it\'s done, signal home: start a new, harder trip and earn Signal Points for perks that last forever.' },
   { id: 'shop', tab: 'shop', text: 'Spend scrap on snares, treats and Beacons, or craft them at the Workbench from robot parts.' },
 ];
 
@@ -151,6 +154,7 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
         {tab === 'bag' && <BagView w={world} act={act} now={now} />}
         {tab === 'fight' && <FightView w={world} act={act} now={now} />}
         {tab === 'shop' && <ShopView w={world} act={act} now={now} />}
+        {tab === 'ship' && <ShipView w={world} act={act} now={now} onSignal={() => { setTab('wilds'); setToast('📡 Signal sent! A new trip begins, and the robots are tougher now.'); }} />}
         {tab === 'guide' && <GuideView w={world} />}
       </main>
 
@@ -303,6 +307,11 @@ function WildsView({ w, now, engage, act }: V & { now: number; engage: (id: stri
           </div>
           <button className="gr-btn o" disabled={w.count('beacon') < 1} onClick={() => act(w.useBeacon(Date.now()))}>{beaconLeft > 0 ? '+30 min' : 'Turn on'}</button>
         </div>
+        <div className="gr-spot">
+          <span className="gr-spot-ic">🐝</span>
+          <div className="gr-grow"><b>This week's swarm</b><div className="gr-dim small">{s.seen[w.swarmKind(now).id] ? morph(w.swarmKind(now).id).name : 'A mystery Greeble'} is everywhere, in every area! Ends in {fmtTime(WEEK_MS - (now % WEEK_MS))}.</div></div>
+        </div>
+        <ExpoSpot w={w} act={act} now={now} />
         <div className="gr-spot">
           <span className="gr-spot-ic">🪤</span>
           <div className="gr-grow">
@@ -601,6 +610,84 @@ function GuideView({ w }: { w: World }) {
           <span>Robots broken</span><b>{n(s.stats.wins)}</b><span>Wrecks cleared</span><b>{n(s.stats.wrecks)}</b>
           <span>Scrap earned</span><b>{n(s.stats.scrapEarned)}</b>
         </div>
+      </section>
+    </>
+  );
+}
+
+function ExpoSpot({ w, act, now }: V & { now: number }) {
+  const s = w.s;
+  const [pick, setPick] = useState(false);
+  const e = s.expo;
+  const free = s.bag.filter(g => !w.busy(g.u)).sort((a, b) => b.lv - a.lv).slice(0, 8);
+  return (
+    <div className="gr-spot">
+      <span className="gr-spot-ic">🧭</span>
+      <div className="gr-grow">
+        <b>Daily expedition</b>
+        {e ? <div className="gr-ok small">{morph(w.get(e.u)?.sp ?? 'ashpup').name} is exploring {region(e.reg).name}. Back in {fmtTime(e.until - now)}.</div>
+          : w.expoReady(now) ? <div className="gr-dim small">Send one Greeble off for 4 hours. It brings back lots of loot, and a rare Greeble follows it home.</div>
+          : <div className="gr-dim small">Next one in {fmtTime(DAY_MS - (now % DAY_MS))}.</div>}
+        {pick && !e && <div className="gr-btns left">{free.map(g => <button key={g.u} className="gr-btn" onClick={() => { act(w.sendExpedition(g.u, Date.now())); setPick(false); }}>{morph(g.sp).name} lv {g.lv}</button>)}</div>}
+      </div>
+      {!e && w.expoReady(now) && <button className="gr-btn o" onClick={() => setPick(p => !p)}>{pick ? 'Cancel' : 'Send'}</button>}
+    </div>
+  );
+}
+
+function ShipView({ w, act, now, onSignal }: V & { now: number; onSignal: () => void }) {
+  const s = w.s;
+  const [keep, setKeep] = useState<string[]>([]);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const done = SHIP_PARTS.filter(p => s.ship[p.id]).length;
+  void now; void EXPEDITION_MS;
+  const toggle = (u: string) => setKeep(k => k.includes(u) ? k.filter(x => x !== u) : k.length >= 3 ? k : [...k, u]);
+  const best = [...s.bag].sort((a, b) => b.lv * b.stars - a.lv * a.stars).slice(0, 16);
+  return (
+    <>
+      <section className="gr-card gr-shipcard">
+        <h2>🚀 Your ship · {done}/{SHIP_PARTS.length} fixed</h2>
+        <p className="gr-dim small">You crashed here. Fix the ship one piece at a time, then signal home.{s.signals ? ` Trips home so far: ${s.signals}. Robots are ${Math.round(w.hard * 100)}% as tough as on your first trip (and pay that much more).` : ''}</p>
+        <div className="gr-bar"><div style={{ width: `${(done / SHIP_PARTS.length) * 100}%` }} /></div>
+        {SHIP_PARTS.map(p => {
+          const why = w.canBuild(p.id); const got = !!s.ship[p.id];
+          return (
+            <div key={p.id} className={`gr-row ${got ? 'down' : ''}`}>
+              <span className="gr-item-ic">{got ? '✅' : p.icon}</span>
+              <div className="gr-grow"><b>{p.name}</b><div className="gr-dim small">{p.desc}</div>
+                {!got && <div className="gr-cost"><span className={s.scrap >= p.scrap ? '' : 'gr-bad'}>🔩 {n(p.scrap)}</span>{(Object.entries(p.cost) as [ItemId, number][]).map(([k, v]) => <span key={k} className={w.count(k) >= v ? '' : 'gr-bad'}>{ITEMS[k].icon} {v} {ITEMS[k].name.replace('Robot ', '').replace('Power ', '')}</span>)}{p.needBoss && !s.bossBeaten[p.needBoss] && <span className="gr-bad">🦾 beat {region(p.needBoss).boss.name}</span>}</div>}
+              </div>
+              {!got && <button className="gr-btn g" disabled={!!why} title={why ?? ''} onClick={() => act(w.buildPart(p.id))}>Build</button>}
+            </div>
+          );
+        })}
+      </section>
+
+      <section className={`gr-card ${w.shipDone ? 'gr-boss-win' : ''}`}>
+        <h2>📡 Signal home</h2>
+        <p className="gr-dim small">Start a new trip. You <b>keep</b>: your Field Guide, Prismatic marks, perks, Signal Points and <b>3 Greebles</b> (at half level). Everything else starts over, and the robots get tougher, but they pay more too.</p>
+        <p>You'd get <b className="gr-gold">{w.signalReward} Signal Points</b> <span className="gr-dim small">(3 + 1 per 10 kinds caught + 1 per boss win + 1 per Prismatic kind)</span></p>
+        {!w.shipDone ? <div className="gr-empty">Fix all {SHIP_PARTS.length} parts of the ship first.</div> : !confirmOpen
+          ? <button className="gr-btn-big" onClick={() => setConfirmOpen(true)}>Get ready to signal home…</button>
+          : (<>
+            <p className="gr-dim small">Pick up to 3 Greebles to bring along ({keep.length}/3):</p>
+            <div className="gr-team">{best.map(g => { const m = morph(g.sp); const on = keep.includes(g.u); return (
+              <button key={g.u} className={`gr-pick ${on ? 'on' : ''}`} disabled={!on && keep.length >= 3} onClick={() => toggle(g.u)}>
+                <Badge m={m} size={34} prism={g.prism} /><small>{m.name}</small><small className="gr-gold">lv {g.lv} {'★'.repeat(g.stars)}</small>
+              </button>); })}</div>
+            <button className="gr-btn-big" onClick={() => { if (confirm(`Signal home and start a new trip? You keep the Field Guide, perks and ${keep.length} Greeble(s).`)) { const r = w.signalHome(keep, Date.now()); act(r); if (r.ok) onSignal(); } }}>📡 Signal home</button>
+          </>)}
+      </section>
+
+      <section className="gr-card">
+        <h2>✨ Perks · {s.sp} Signal Point{s.sp === 1 ? '' : 's'}</h2>
+        <p className="gr-dim small">Perks last forever, through every trip home.</p>
+        {PERKS.map(p => { const lv = w.perk(p.id); const c = perkCost(lv); return (
+          <div key={p.id} className="gr-row">
+            <span className="gr-item-ic">{p.icon}</span>
+            <div className="gr-grow"><b>{p.name}</b> <span className="gr-dim small">· lv {lv}/{p.max}</span><div className="gr-dim small">{p.desc}</div></div>
+            <button className="gr-btn o" disabled={lv >= p.max || s.sp < c} onClick={() => act(w.buyPerk(p.id))}>{lv >= p.max ? 'Max' : `${c} SP`}</button>
+          </div>); })}
       </section>
     </>
   );
