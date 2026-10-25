@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { World, newGame, type GameEvent, type Greeble } from '../sim/world';
 import {
   FAMILIES, ITEMS, MORPHS, RARITY_LABEL, REWARDS, ROBOTS, RULES, SNARES, craterAt, isNight, morph, roleLabel, stormAt, untilFlip, xpNeed,
-  type ItemId,
+  REGIONS, TEAM_MAX, UPGRADES, region, robotIn,
+  type ItemId, type RegionId,
 } from '../sim/content';
 import { saveLocal, wipeLocal } from '../save/storage';
 import { onHubFlush, sendToHub } from '../save/hub';
@@ -33,6 +34,7 @@ function message(e: GameEvent, w: World): string | null {
     case 'wreck': return `🤖 A robot is guarding a wreck. Beat it on the Fight tab for a burst of Greebles!`;
     case 'reward': return `📖 Guide reward: ${e.label}!`;
     case 'beacon': return '🛰️ Beacon on! Greebles will wander in fast for 30 minutes.';
+    case 'bossLost': return `Your team was beaten by the ${region(e.reg).boss.name}. Level up, evolve, and try again!`;
     default: return null;
   }
 }
@@ -42,6 +44,7 @@ const TIPS: { id: string; tab: Tab; text: string }[] = [
   { id: 'camp', tab: 'camp', text: 'Greebles in camp earn scrap and xp every 15 seconds, even when the game is closed. Better stars and evolved forms earn more.' },
   { id: 'bag', tab: 'bag', text: 'Greebles evolve when they reach the right level (some need an item, or night time). Graft a copy in for a big level jump and a chance at more stars.' },
   { id: 'fight', tab: 'fight', text: 'Robots patrol the planet. Skirmish Greebles break them for scrap and snares. Beat a robot at a wreck and Greebles come out of hiding.' },
+  { id: 'boss', tab: 'fight', text: 'Each area has a robot boss. Beat it with a team of up to 3 to open the next area and call out its Legendary Greeble!' },
   { id: 'shop', tab: 'shop', text: 'Spend scrap on snares, treats and Beacons. A Beacon brings Greebles in fast for 30 minutes.' },
 ];
 
@@ -57,6 +60,7 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
   const [toast, setToast] = useState<string | null>(null);
   const [menu, setMenu] = useState<null | 'settings' | 'news' | 'dev'>(null);
   const [away, setAway] = useState<null | { ms: number; scrap: number; levels: number; waiting: number }>(null);
+  const [bossWin, setBossWin] = useState<null | Extract<GameEvent, { t: 'bossWon' }>>(null);
   const [evolving, setEvolving] = useState<null | { from: string; to: string; prism: boolean }>(null);
   const [encOpen, setEncOpen] = useState(() => !!world.s.enc);
   const [encKey, setEncKey] = useState(0);
@@ -66,6 +70,8 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
   const flushEvents = () => {
     const evs = world.drain();
     const evo = evs.find(e => e.t === 'evolved') as Extract<GameEvent, { t: 'evolved' }> | undefined;
+    const bw = evs.find(e => e.t === 'bossWon') as Extract<GameEvent, { t: 'bossWon' }> | undefined;
+    if (bw) setBossWin(bw);
     if (evo) setEvolving({ from: evo.from, to: evo.to, prism: !!world.get(evo.u)?.prism });
     const msgs = evs.map(e => message(e, world)).filter(Boolean) as string[];
     if (msgs.length) setToast(msgs[msgs.length - 1]);
@@ -125,7 +131,7 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
   return (
     <div className="gr-app">
       <header className="gr-top">
-        <div className="gr-title"><b>GREEBLES</b><span>{isNight(now) ? '🌙 Night' : '☀️ Day'}{stormAt(now)?.on ? ' · ⛈️ Storm' : ''}</span></div>
+        <div className="gr-title"><b>GREEBLES</b><span>{world.reg.icon} {world.reg.name} {isNight(now) ? '🌙' : '☀️'}{stormAt(now)?.on ? '⛈️' : ''}</span></div>
         <div className="gr-sp" />
         <div className="gr-pill" title="Scrap">🔩 <span>{n(s.scrap)}</span></div>
         <button className="gr-icon" onClick={() => setMenu('news')} title="What's new">📜</button>
@@ -147,7 +153,7 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
         {TABS.map(t => (
           <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => { setTab(t.id); setToast(null); }}>
             <span className="gr-ti">{t.icon}</span><span>{t.label}</span>
-            {t.id === 'wilds' && tab !== 'wilds' && s.spawns.length > 0 && <i className="gr-count">{s.spawns.length}</i>}
+            {t.id === 'wilds' && tab !== 'wilds' && world.here.length > 0 && <i className="gr-count">{world.here.length}</i>}
             {t.id === 'bag' && readyToEvolve && <i className="gr-dot gold" />}
             {t.id === 'fight' && (s.fight || s.wreck) && <i className={`gr-dot ${s.wreck ? 'gold' : 'red'}`} />}
           </button>
@@ -173,11 +179,24 @@ export function App({ start }: { start: ReturnType<typeof newGame> | null }) {
         </div>
       )}
 
+      {bossWin && (
+        <div className="gr-sheet-back" onClick={() => setBossWin(null)}>
+          <div className="gr-sheet gr-boss-win" onClick={e => e.stopPropagation()}>
+            <h2>🏆 {region(bossWin.reg).boss.name} defeated!</h2>
+            <p className="gr-big">+{n(bossWin.scrap)} scrap</p>
+            <p>{Object.entries(bossWin.loot).map(([k, v]) => `${ITEMS[k as ItemId].icon} ${v} ${ITEMS[k as ItemId].name}`).join(' · ')}</p>
+            {bossWin.unlocked && <p className="gr-big2">🗺️ {region(bossWin.unlocked).name} is open!</p>}
+            <p className="gr-prism-text">{morph(region(bossWin.reg).legendary).name}, the Legendary of {region(bossWin.reg).name}, has appeared in the wilds…</p>
+            <button className="gr-btn-big" onClick={() => { setBossWin(null); setTab('wilds'); }}>Go find it</button>
+          </div>
+        </div>
+      )}
+
       {away && !encOpen && (
         <div className="gr-sheet-back" onClick={() => setAway(null)}>
           <div className="gr-sheet" onClick={e => e.stopPropagation()}>
             <h2>Welcome back</h2>
-            <p>You were gone {fmtDur(away.ms)}{away.ms >= RULES.offlineCapMs ? ' (camp counts up to 8 hours)' : ''}.</p>
+            <p>You were gone {fmtDur(away.ms)}{away.ms >= world.offlineCap ? ` (camp counts up to ${Math.round(world.offlineCap / 3600000)} hours)` : ''}.</p>
             {away.scrap > 0 && <p className="gr-big">+{n(away.scrap)} scrap</p>}
             {away.levels > 0 && <p>Your campers went up {away.levels} level{away.levels > 1 ? 's' : ''}.</p>}
             {away.waiting > 0 && <p className="gr-big2">🌿 {away.waiting} Greeble{away.waiting > 1 ? 's are' : ' is'} out in the wilds!</p>}
@@ -227,10 +246,25 @@ function WildsView({ w, now, engage, act }: V & { now: number; engage: (id: stri
   const nextCrater = crater && !crater.on && crater.start > now ? crater : craterAt(now + RULES.craterBlockMs - (now % RULES.craterBlockMs) + 1);
   const storm = stormAt(now);
   const beaconLeft = Math.max(0, s.beaconUntil - now);
-  const spawns = [...s.spawns].sort((a, b) => a.at - b.at);
+  const spawns = [...w.here].sort((a, b) => a.at - b.at);
+  const reg = w.reg;
+  const elsewhere = (id: RegionId) => s.spawns.filter(x => x.reg === id).length;
   return (
     <>
-      <section className={`gr-wilds ${isNight(now) ? 'night' : ''} ${storm?.on ? 'storm' : ''}`}>
+      <div className="gr-regions">
+        {REGIONS.map((r, i) => {
+          const open = w.isOpen(r.id); const k = elsewhere(r.id);
+          return (
+            <button key={r.id} className={`gr-region ${s.region === r.id ? 'on' : ''} ${open ? '' : 'locked'}`} onClick={() => act(w.travel(r.id))}>
+              <span>{open ? r.icon : '🔒'}</span><small>{r.name}</small>
+              {open && k > 0 && s.region !== r.id && <i className="gr-count">{k}</i>}
+              {!open && <small className="gr-dim">Beat {REGIONS[i - 1].boss.name}</small>}
+            </button>
+          );
+        })}
+      </div>
+      <p className="gr-dim small gr-region-blurb">{reg.icon} <b>{reg.name}</b> — {reg.blurb}{reg.lvl ? ` Wild Greebles here are +${reg.lvl} levels.` : ''}{s.bossBeaten[reg.id] ? ` ${morph(reg.legendary).name} roams here now…` : ''}</p>
+      <section className={`gr-wilds reg-${reg.id} ${isNight(now) ? 'night' : ''} ${storm?.on ? 'storm' : ''}`}>
         {spawns.map(x => {
           const m = morph(x.sp);
           return (
@@ -307,10 +341,25 @@ function CampView({ w, act }: V) {
     <>
       <section className="gr-card">
         <h2>Camp · {s.camp.filter(Boolean).length}/{s.camp.length} working</h2>
-        <p className="gr-dim">Every 15 seconds each camper earns scrap and a little xp, even while you're away (up to 8 hours). The Field Guide unlocks more spots.</p>
+        <p className="gr-dim">Every 15 seconds each camper earns scrap and a little xp, even while you're away (up to {Math.round(w.offlineCap / 3600000)} hours). Build tents or fill the Field Guide for more spots.</p>
         {s.camp.map((u, i) => { const g = u ? w.get(u) : undefined; return g
           ? <Row key={i} g={g} w={w} right={<button className="gr-btn" onClick={() => act(w.bench(i))}>Bench</button>} />
           : <div key={i} className="gr-row empty">Empty camp spot {i + 1}</div>; })}
+      </section>
+      <section className="gr-card">
+        <h2>Build your camp</h2>
+        <p className="gr-dim small">Spend scrap on upgrades that last forever.</p>
+        {UPGRADES.map(u => {
+          const lv = w.up(u.id); const price = w.upgradePrice(u.id);
+          const maxed = price === null || (u.id === 'tent' && s.camp.length >= RULES.maxCampSlots);
+          return (
+            <div key={u.id} className="gr-row">
+              <span className="gr-item-ic">{u.icon}</span>
+              <div className="gr-grow"><b>{u.name}</b> <span className="gr-dim small">· lv {lv}/{u.prices.length}{lv ? ` · now ${u.effect(lv)}` : ''}</span><div className="gr-dim small">{u.desc}</div></div>
+              <button className="gr-btn g" disabled={maxed || s.scrap < (price ?? Infinity)} onClick={() => act(w.buyUpgrade(u.id))}>{maxed ? 'Max' : n(price!)}</button>
+            </div>
+          );
+        })}
       </section>
       <section className="gr-card">
         <h2>Send from bag</h2>
@@ -340,7 +389,7 @@ function BagView({ w, act, now }: V & { now: number }) {
       <div className="gr-sort">{(['kind', 'level', 'rarity', 'new'] as Sort[]).map(k => <button key={k} className={sort === k ? 'on' : ''} onClick={() => setSort(k)}>{k === 'kind' ? 'Kind' : k === 'level' ? 'Level' : k === 'rarity' ? 'Rarity' : 'Newest'}</button>)}</div>
       {!sorted.length && <div className="gr-empty">Empty. Go catch some in the Wilds.</div>}
       {sorted.map(g => {
-        const tag = w.inCamp(g.u) ? '⛺ camping' : s.fight?.u === g.u ? '⚔️ fighting' : null;
+        const tag = w.inCamp(g.u) ? '⛺ camping' : w.fighting(g.u) ? '⚔️ fighting' : null;
         const canGraft = !!w.graftPartner(g.u);
         const ready = w.evoOptions(g, now).filter(o => o.ready);
         return (
@@ -350,7 +399,7 @@ function BagView({ w, act, now }: V & { now: number }) {
               {tag && <span className="gr-tag">{tag}</span>}
               {ready.map(o => <button key={o.evo.to} className="gr-btn evo" onClick={() => act(w.evolve(g.u, o.evo.to, Date.now()))}>🌟 Evolve{ready.length > 1 || o.evo.item ? ` → ${morph(o.evo.to).name}` : ''}</button>)}
               {canGraft && <button className="gr-btn o" onClick={() => act(w.graft(g.u))}>Graft</button>}
-              <button className="gr-btn d" disabled={s.fight?.u === g.u} onClick={() => sell(g)}>Sell {n(w.sellValue(g))}</button>
+              <button className="gr-btn d" disabled={w.fighting(g.u)} onClick={() => sell(g)}>Sell {n(w.sellValue(g))}</button>
             </div>
           </div>
         );
@@ -361,43 +410,69 @@ function BagView({ w, act, now }: V & { now: number }) {
 
 function FightView({ w, act, now }: V & { now: number }) {
   const s = w.s;
+  const [team, setTeam] = useState<string[]>([]);
+  const reg = w.reg;
   if (s.fight) {
-    const f = s.fight, g = w.get(f.u)!, m = morph(g.sp), r = ROBOTS.find(x => x.id === f.robot)!;
+    const f = s.fight;
+    const foe = (() => { const r0 = s.region; s.region = f.reg; const x = w.foe(f.robot, f.kind); s.region = r0; return x; })();
     return (
-      <section className="gr-card">
-        <h2>{f.wreck ? 'Battle at the wreck' : 'Battle'}</h2>
-        <div className="gr-row"><Badge m={m} prism={g.prism} /><div className="gr-grow"><b>{m.name}</b> lv {g.lv} · HP {Math.max(0, f.hp)}<div className="gr-hp"><div style={{ width: `${Math.max(0, (100 * f.hp) / f.maxHp)}%` }} /></div></div></div>
+      <section className={`gr-card ${f.kind === 'boss' ? 'gr-boss' : ''}`}>
+        <h2>{f.kind === 'boss' ? `Boss: ${foe?.name}` : f.kind === 'wreck' ? 'Battle at the wreck' : 'Battle'} · {region(f.reg).icon} {region(f.reg).name}</h2>
+        {f.team.map(x => { const g = w.get(x.u); if (!g) return null; const m = morph(g.sp); return (
+          <div key={x.u} className={`gr-row ${x.hp <= 0 ? 'down' : ''}`}><Badge m={m} prism={g.prism} /><div className="gr-grow"><b>{m.name}</b> lv {g.lv} · HP {Math.max(0, x.hp)}<div className="gr-hp"><div style={{ width: `${Math.max(0, (100 * x.hp) / x.maxHp)}%` }} /></div></div></div>); })}
         <div className="gr-vs">VS</div>
-        <div className="gr-row"><div className="gr-badge robot">🤖</div><div className="gr-grow"><b>{r.name}</b> · HP {Math.max(0, f.robotHp)}<div className="gr-hp bot"><div style={{ width: `${Math.max(0, (100 * f.robotHp) / f.robotMax)}%` }} /></div></div></div>
-        <p className="gr-dim">The fight plays itself, one hit a second. Camp keeps working.</p>
+        <div className="gr-row"><div className={`gr-badge robot ${f.kind === 'boss' ? 'boss' : ''}`}>{f.kind === 'boss' ? '🦾' : '🤖'}</div><div className="gr-grow"><b>{foe?.name}</b> · HP {n(Math.max(0, f.robotHp))}<div className="gr-hp bot"><div style={{ width: `${Math.max(0, (100 * f.robotHp) / f.robotMax)}%` }} /></div></div></div>
+        <p className="gr-dim">The fight plays itself, one round a second. Camp keeps working.</p>
       </section>
     );
   }
   const fighters = s.bag.filter(g => morph(g.sp).role === 'fight').sort((a, b) => w.power(b) - w.power(a));
+  const helpers = s.bag.filter(g => !w.inCamp(g.u)).sort((a, b) => w.teamPower(b) - w.teamPower(a)).slice(0, 12);
   const wr = s.wreck && ROBOTS.find(r => r.id === s.wreck!.robot);
+  const bossReady = w.bossReadyAt(reg.id);
+  const boss = w.foe('boss', 'boss')!;
+  const toggle = (u: string) => setTeam(t => t.includes(u) ? t.filter(x => x !== u) : t.length >= TEAM_MAX ? t : [...t, u]);
+  const pickedOk = team.filter(u => w.get(u) && !w.inCamp(u));
+  const bossWin = pickedOk.length > 0 && w.wouldWin(pickedOk, 'boss', 'boss');
   return (
     <>
+      <section className="gr-card gr-boss">
+        <h2>🦾 {reg.boss.name} <span className="gr-dim small">· boss of {reg.icon} {reg.name}</span></h2>
+        <p className="gr-dim">HP {n(boss.hp)} · hits {boss.atk}. Pick up to {TEAM_MAX} Greebles (any caste; Skirmish hit hardest).{s.bossBeaten[reg.id] ? ' Beat it again for more loot.' : ` Win to ${REGIONS[REGIONS.findIndex(r => r.id === reg.id) + 1] ? `open ${REGIONS[REGIONS.findIndex(r => r.id === reg.id) + 1].name} and ` : ''}call out ${morph(reg.legendary).name}, the Legendary of this area!`}</p>
+        {now < bossReady ? <div className="gr-empty">Being rebuilt… back in {fmtTime(bossReady - now)}</div> : (<>
+          <div className="gr-team">
+            {helpers.map(g => { const m = morph(g.sp); const on = team.includes(g.u); return (
+              <button key={g.u} className={`gr-pick ${on ? 'on' : ''}`} onClick={() => toggle(g.u)} disabled={!on && team.length >= TEAM_MAX}>
+                <Badge m={m} size={34} prism={g.prism} /><small>{m.name}</small><small className="gr-gold">⚔ {w.teamPower(g)}</small>
+              </button>); })}
+            {!helpers.length && <div className="gr-empty">Bench some Greebles from camp to fight.</div>}
+          </div>
+          <button className={`gr-btn-big ${pickedOk.length && !bossWin ? 'risky' : ''}`} disabled={!pickedOk.length} onClick={() => { act(w.startFight(pickedOk, 'boss', 'boss')); setTeam([]); }}>
+            {!pickedOk.length ? `Pick your team (0/${TEAM_MAX})` : `${bossWin ? '✓' : '✗ Risky —'} Fight with ${pickedOk.length}`}
+          </button>
+        </>)}
+      </section>
       {wr && (
         <section className="gr-card gr-wreck">
           <h2>🤖 Robot wreck</h2>
           <p className="gr-dim">A {wr.name} (tougher than usual) is guarding a wreck for {fmtTime(s.wreck!.until - now)}. Beat it and {RULES.wreckBurst} Greebles come out of hiding, with better odds of rare ones.</p>
           {!fighters.length ? <div className="gr-empty">You need a Skirmish Greeble.</div> : fighters.slice(0, 6).map(g => {
-            const win = w.wouldWin(g, wr.id, true);
-            return <Row key={g.u} g={g} w={w} right={<button className={`gr-btn ${win ? 'g' : 'd'}`} disabled={w.inCamp(g.u)} onClick={() => act(w.startFight(g.u, wr.id, true))}>{win ? '✓' : '✗'} Attack</button>} />;
+            const win = w.wouldWin(g.u, wr.id, 'wreck');
+            return <Row key={g.u} g={g} w={w} right={<button className={`gr-btn ${win ? 'g' : 'd'}`} disabled={w.inCamp(g.u)} onClick={() => act(w.startFight(g.u, wr.id, 'wreck'))}>{win ? '✓' : '✗'} Attack</button>} />;
           })}
         </section>
       )}
       <section className="gr-card">
-        <h2>Robot patrol</h2>
-        <p className="gr-dim">Only Skirmish Greebles fight. Wins pay scrap, xp and snares (sometimes an evolution item). ✓ means you should win.</p>
-        <div className="gr-robots">{ROBOTS.map(r => <div key={r.id} className="gr-robot"><b>{r.name}</b><span>HP {r.hp} · hits {r.atk}</span></div>)}</div>
+        <h2>Robot patrol · {reg.icon} {reg.name}</h2>
+        <p className="gr-dim">One Skirmish Greeble at a time. Wins pay scrap, xp and snares (sometimes an evolution item). Robots get tougher in later areas. ✓ means you should win.</p>
+        <div className="gr-robots">{ROBOTS.map(r => { const st = robotIn(r, reg); return <div key={r.id} className="gr-robot"><b>{r.name}</b><span>HP {n(st.hp)} · hits {st.atk}</span></div>; })}</div>
         {!fighters.length ? <div className="gr-empty">You need a Skirmish Greeble (Scrap, Rust, Thorn…). Catch one in the Wilds.</div>
           : fighters.map(g => (
             <div key={g.u} className="gr-bagitem">
               <Row g={g} w={w} />
               <div className="gr-btns">
                 <span className="gr-tag pow">Power {w.power(g)}{w.inCamp(g.u) ? ' · ⛺ camping' : ''}</span>
-                {ROBOTS.map(r => { const win = w.wouldWin(g, r.id); return <button key={r.id} className={`gr-btn ${win ? 'g' : 'd'}`} disabled={w.inCamp(g.u)} onClick={() => act(w.startFight(g.u, r.id))}>{win ? '✓' : '✗'} {r.short}</button>; })}
+                {ROBOTS.map(r => { const win = w.wouldWin(g.u, r.id); return <button key={r.id} className={`gr-btn ${win ? 'g' : 'd'}`} disabled={w.inCamp(g.u)} onClick={() => act(w.startFight(g.u, r.id))}>{win ? '✓' : '✗'} {r.short}</button>; })}
               </div>
             </div>))}
       </section>

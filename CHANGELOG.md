@@ -1,5 +1,15 @@
 # Greebles — What's New
 
+## 0.3.0 — Areas, bosses & camp
+- A map! Four areas to explore: Ash Flats, Tide Pools, Rust Fields and Glass Spires. Each has its own Greebles, and wild Greebles are higher level the further you go.
+- Every area has a robot boss. Pick a team of up to 3 Greebles to fight it (Skirmish Greebles hit hardest). Beat it to open the next area.
+- Beating a boss calls out that area's Legendary Greeble, and from then on it can roam there. The Glass Spires has a brand new one: the Crystal Sovereign.
+- Bosses can be fought again every 2 hours for more scrap, Great Snares and Beacons.
+- Robots get tougher (and pay more) in later areas.
+- 16 new Greebles: Shell, Coral, Bolt, Cog, Shard and Glow families, plus the Crystal Sovereign. 60 kinds in all.
+- Build your camp with scrap: extra tents (up to 8 spots), a bigger bag, a Night Watch so camp earns longer while you're away (up to 24 hours), a Workbench for more scrap, and a Snare Press that makes free snares.
+- New Field Guide rewards at 50, 55 and 60 kinds.
+
 ## 0.2.0 — Catch & Collect
 - The Wilds: Greebles now wander into the wilds on their own, even when the game is closed. Up to 6 wait at once and each stays about 2 hours, so coming back after a while means a bunch to catch in a row.
 - Catch them yourself: tap a Greeble, pick a snare and throw it when the ring is small. Nice, Great and Perfect throws catch better. Rarer Greebles are harder to catch and may run away.

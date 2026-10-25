@@ -72,6 +72,24 @@ export const MORPHS: Morph[] = [
   k('nyxil', 'Prime Scrapper', 'fight', 'epic', 1, '▼', '#5a3a78', { evo: [{ to: 'nyxilar', lv: 30 }] }),
   k('nyxilar', 'Void Scrapper', 'fight', 'epic', 2, '✠', '#2a1848'),
   k('myrrhax', 'Apex Scrapper', 'fight', 'legendary', 1, '♔', '#e0c36a'),
+  // ── 0.3: Tide Pools ────────────────────────────────────
+  k('shellit', 'Shell Greeble', 'fish', 'common', 1, '◒', '#c8a070', { evo: [{ to: 'shellor', lv: 16 }] }),
+  k('shellor', 'Shellback Greeble', 'fish', 'common', 2, '◓', '#a07848'),
+  k('coralin', 'Coral Greeble', 'fish', 'uncommon', 1, '✿', '#e07888', { evo: [{ to: 'coraleth', lv: 20, item: 'pearl' }] }),
+  k('coraleth', 'Reef Greeble', 'fish', 'uncommon', 2, '❀', '#c04868'),
+  // ── 0.3: Rust Fields ───────────────────────────────────
+  k('boltik', 'Bolt Greeble', 'fight', 'common', 1, 'ϟ', '#d8c040', { tags: ['storm'], evo: [{ to: 'boltrax', lv: 16 }] }),
+  k('boltrax', 'Volt Greeble', 'fight', 'common', 2, '⚡', '#e8a820', { evo: [{ to: 'boltaros', lv: 30 }] }),
+  k('boltaros', 'Storm Volt', 'fight', 'common', 3, '☈', '#f0d050'),
+  k('cogling', 'Cog Greeble', 'mine', 'uncommon', 1, '⚙', '#8a8a98', { evo: [{ to: 'cogmaw', lv: 20 }] }),
+  k('cogmaw', 'Gear Greeble', 'mine', 'uncommon', 2, '⛭', '#5a5a6a'),
+  // ── 0.3: Glass Spires ──────────────────────────────────
+  k('shardy', 'Shard Greeble', 'mine', 'common', 1, '◆', '#90d8f0', { evo: [{ to: 'shardon', lv: 18 }] }),
+  k('shardon', 'Crystal Greeble', 'mine', 'common', 2, '❖', '#60b8e8', { evo: [{ to: 'shardros', lv: 32, night: true }] }),
+  k('shardros', 'Spire Greeble', 'mine', 'common', 3, '⟁', '#3a90d8'),
+  k('lumen', 'Glow Greeble', 'fish', 'rare', 1, '✺', '#f0f0a0', { tags: ['night'], evo: [{ to: 'lumenar', lv: 24, item: 'sun' }] }),
+  k('lumenar', 'Radiant Greeble', 'fish', 'rare', 2, '☀', '#fff0a0'),
+  k('aurelith', 'Crystal Sovereign', 'mine', 'legendary', 1, '♛', '#a8f0ff'),
   // ── Mythic ─────────────────────────────────────────────
   k('starborn', 'Starborn Greeble', 'fight', 'mythic', 1, '✺', '#ff8ad8', { tags: ['night'], nightOnly: true }),
 ];
@@ -161,7 +179,56 @@ export const REWARDS: Reward[] = [
   { id: 'c35', need: 35, label: 'One of every evolution item', give: { ember: 1, pearl: 1, sun: 1, moon: 1 } },
   { id: 'c40', need: 40, label: 'A 7th camp spot + 20 bag space', give: { camp: 1, bag: 20 } },
   { id: 'c45', need: 45, label: '3 Star Snares + an 8th camp spot', give: { star: 3, camp: 1 } },
+  { id: 'c50', need: 50, label: '2 Star Snares + 3 Beacons', give: { star: 2, beacon: 3 } },
+  { id: 'c55', need: 55, label: '+30 bag space', give: { bag: 30 } },
+  { id: 'c60', need: 60, label: '5 Star Snares', give: { star: 5 } },
 ];
+
+// ── 0.3: areas of the planet ──────────────────────────────
+export type RegionId = 'ash' | 'tide' | 'rust' | 'glass';
+export interface Boss { name: string; hp: number; atk: number; xp: number; scrap: number }
+export interface Region {
+  id: RegionId; name: string; icon: string; blurb: string;
+  /** Wild Greebles here are this many levels higher. */
+  lvl: number;
+  /** Robots here are this much tougher. */
+  mult: number;
+  kinds: string[];
+  legendary: string;
+  boss: Boss;
+}
+export const REGIONS: Region[] = [
+  { id: 'ash', name: 'Ash Flats', icon: '🏜️', blurb: 'Where you crashed. Dusty, warm, and full of young Greebles.', lvl: 0, mult: 1,
+    kinds: ['ashpup', 'vorr', 'scrappling', 'velm', 'skarnox', 'tidling', 'umberith', 'zoln', 'phaest'], legendary: 'quorvex',
+    boss: { name: 'Rust Warden', hp: 120, atk: 9, xp: 150, scrap: 300 } },
+  { id: 'tide', name: 'Tide Pools', icon: '🌊', blurb: 'Warm shallow water. Trawl Greebles love it here.', lvl: 6, mult: 2.2,
+    kinds: ['tidling', 'iskari', 'vesperid', 'thalune', 'orryx', 'caelith', 'shellit', 'coralin', 'vorr'], legendary: 'aelurion',
+    boss: { name: 'Tide Dredger', hp: 500, atk: 18, xp: 400, scrap: 1200 } },
+  { id: 'rust', name: 'Rust Fields', icon: '⚙️', blurb: 'An old robot junkyard. The robots here hit hard.', lvl: 12, mult: 4,
+    kinds: ['scrappling', 'velm', 'hokari', 'pyrrax', 'nyxil', 'umberith', 'zoln', 'boltik', 'cogling'], legendary: 'myrrhax',
+    boss: { name: 'Scrap Colossus', hp: 1200, atk: 30, xp: 900, scrap: 4000 } },
+  { id: 'glass', name: 'Glass Spires', icon: '💎', blurb: 'Tall crystal towers that glow at night. The rarest Greebles live here.', lvl: 18, mult: 7,
+    kinds: ['klyx', 'vesperid', 'hokari', 'shardy', 'lumen', 'iskari', 'phaest', 'caelith', 'nyxil'], legendary: 'aurelith',
+    boss: { name: 'Prism Sentinel', hp: 2500, atk: 45, xp: 2000, scrap: 12000 } },
+];
+export const region = (id: string): Region => REGIONS.find(r => r.id === id) ?? REGIONS[0];
+export const regionIndex = (id: string) => Math.max(0, REGIONS.findIndex(r => r.id === id));
+export const BOSS_REMATCH_MS = 2 * 60 * 60 * 1000;
+export const TEAM_MAX = 3;
+/** Robot stats in an area: tougher the further you go. */
+export const robotIn = (rb: Robot, reg: Region) => ({ hp: Math.round(rb.hp * reg.mult), atk: Math.round(rb.atk * Math.sqrt(reg.mult)), xp: Math.round(rb.xp * reg.mult) });
+
+// ── 0.3: camp upgrades (bought with scrap) ─────────────────
+export type UpgradeId = 'tent' | 'bag' | 'away' | 'bench' | 'press';
+export interface UpgradeDef { id: UpgradeId; name: string; icon: string; desc: string; prices: number[]; effect: (lv: number) => string }
+export const UPGRADES: UpgradeDef[] = [
+  { id: 'tent', name: 'Extra tent', icon: '⛺', desc: 'One more camp spot (up to 8 total).', prices: [500, 1500, 4000, 10000], effect: lv => `+${lv} spot${lv === 1 ? '' : 's'}` },
+  { id: 'bag', name: 'Bigger bag', icon: '🎒', desc: '+10 bag space.', prices: [200, 400, 800, 1600, 3200, 6400, 12800, 25600], effect: lv => `+${lv * 10} space` },
+  { id: 'away', name: 'Night watch', icon: '🔦', desc: 'Camp keeps earning longer while you are away.', prices: [800, 2500, 6000, 15000], effect: lv => `${8 + lv * 4} h away` },
+  { id: 'bench', name: 'Workbench', icon: '🔨', desc: 'Campers earn 10% more scrap.', prices: [300, 750, 1900, 4700, 11700], effect: lv => `+${lv * 10}% scrap` },
+  { id: 'press', name: 'Snare press', icon: '🟢', desc: 'Makes free Snares, even while you are away.', prices: [1000, 4000, 12000], effect: lv => `${lv * 2} Snares / hour` },
+];
+export const PRESS_MS_PER_SNARE = 30 * 60 * 1000;  // per level: 1 snare / 30 min
 
 const byId = new Map(MORPHS.map(m => [m.id, m]));
 export function morph(id: string): Morph {

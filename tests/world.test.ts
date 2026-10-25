@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { World, newGame, migrate } from '../src/sim/world';
-import { FAMILIES, MORPHS, RULES, SPAWNABLE, craterAt, isNight, morph, stormAt } from '../src/sim/content';
+import { FAMILIES, MORPHS, REGIONS, RULES, SPAWNABLE, craterAt, isNight, morph, stormAt } from '../src/sim/content';
 
 const T0 = 1_800_000_000_000;
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -11,7 +11,7 @@ const meet = (w: World, sp = 'ashpup', lv = 1) => { const x = w.addSpawn(T0, 'wi
 
 describe('content', () => {
   it('has ~45 kinds, and every evolution points at a real kind of the same caste', () => {
-    expect(MORPHS.length).toBeGreaterThanOrEqual(45);
+    expect(MORPHS.length).toBeGreaterThanOrEqual(60);
     for (const m of MORPHS) for (const e of m.evo ?? []) { expect(morph(e.to).role).toBe(m.role); expect(morph(e.to).stage).toBe(m.stage + 1); }
     expect(FAMILIES.flat().length).toBe(MORPHS.length); // every kind sits in exactly one family
   });
@@ -90,8 +90,11 @@ describe('the wilds', () => {
     const c: Record<string, number> = {};
     for (let i = 0; i < 20_000; i++) { const m = w.rollKind(T0 + 10 * MIN); c[m.rarity] = (c[m.rarity] ?? 0) + 1; }
     expect(c.common / 20_000).toBeGreaterThan(0.45);
-    expect(c.legendary).toBeGreaterThan(50); expect(c.legendary).toBeLessThan(400);
-    expect(c.mythic ?? 0).toBe(0); // the Mythic only comes from its own stormy-night event
+    expect(c.legendary ?? 0).toBe(0);  // no Legendary until you beat the area boss…
+    expect(c.mythic ?? 0).toBe(0);     // …and the Mythic only comes from its own stormy-night event
+    w.s.bossBeaten.ash = T0;
+    let leg = 0; for (let i = 0; i < 20_000; i++) if (w.rollKind(T0 + 10 * MIN).rarity === 'legendary') leg++;
+    expect(leg).toBeGreaterThan(50); expect(leg).toBeLessThan(400);
   });
 });
 
@@ -214,7 +217,7 @@ describe('camp, shop and robots', () => {
     const w = fresh();
     w.s.wreck = { robot: 'drone', until: T0 + HOUR };
     const f = give(w, 'draug', 20, 5);
-    expect(w.wouldWin(w.get(f)!, 'drone', true)).toBe(true);
+    expect(w.wouldWin(f, 'drone', true)).toBe(true);
     expect(w.startFight(f, 'drone', true).ok).toBe(true);
     w.s.spawns = [];
     w.advance(60_000, T0);
@@ -226,7 +229,7 @@ describe('camp, shop and robots', () => {
   it('the win check matches a real fight', () => {
     const w = fresh();
     for (const lv of [1, 3, 6, 10, 20]) for (const r of ['drone', 'pylon', 'colossus']) {
-      const u = give(w, 'velm', lv); const guess = w.wouldWin(w.get(u)!, r);
+      const u = give(w, 'velm', lv); const guess = w.wouldWin(u, r);
       w.startFight(u, r); w.advance(120_000, T0);
       expect(w.s.stats.wins > 0).toBe(guess); w.s.stats.wins = 0; w.s.stats.losses = 0;
     }
@@ -238,7 +241,8 @@ describe('saves', () => {
     const old = { scrap: 120, bag: [{ u: 'g1', sp: 'draug', lv: 12, xp: 5 }, { u: 'g2', sp: 'nulith', lv: 3, xp: 0 }, { u: 'g3', sp: 'gone', lv: 1 }],
       camp: ['g2', null, null, null], huntAt: 0, campCarry: 0, fight: null, seen: { draug: true }, stats: { caught: 2 }, lastSeen: T0, tips: { walk: true } };
     const s = migrate(old, T0);
-    expect(s.version).toBe(2);
+    expect(s.version).toBe(3);
+    expect(s.region).toBe('ash'); expect(s.unlocked).toBe(1);
     expect(s.bag.map(g => g.sp)).toEqual(['draug', 'nulith']);
     expect(s.bag[0].stars).toBe(3);
     expect(s.camp[0]).toBe('g2');
@@ -263,5 +267,93 @@ describe('saves', () => {
     expect(s.items.snare).toBeUndefined(); expect(s.items.beacon).toBe(2);
     expect(s.spawns).toEqual([]); expect(s.enc).toBeNull();
     expect(migrate(null, T0).bag).toEqual([]);
+  });
+});
+
+describe('0.3: areas, bosses, camp upgrades', () => {
+  it('every area kind is real, stage 1, and every area has a Legendary + a boss', () => {
+    for (const r of REGIONS) {
+      for (const k of r.kinds) expect(morph(k).stage).toBe(1);
+      expect(morph(r.legendary).rarity).toBe('legendary');
+      expect(r.boss.hp).toBeGreaterThan(0);
+    }
+    // every catchable kind lives somewhere
+    for (const m of SPAWNABLE) if (m.rarity !== 'mythic') expect(REGIONS.some(r => r.kinds.includes(m.id) || r.legendary === m.id)).toBe(true);
+  });
+
+  it('only the area you are in spawns its kinds, at its level', () => {
+    const w = fresh(); w.s.unlocked = 4; w.travel('glass');
+    for (let i = 0; i < 200; i++) { const x = w.addSpawn(T0, 'wild'); expect(REGIONS[3].kinds).toContain(x.sp); expect(x.lv).toBeGreaterThan(REGIONS[3].lvl); expect(x.reg).toBe('glass'); }
+    expect(w.here.every(x => x.reg === 'glass')).toBe(true);
+  });
+
+  it('locked areas cannot be visited', () => {
+    const w = fresh();
+    expect(w.travel('tide').ok).toBe(false);
+    expect(w.s.region).toBe('ash');
+  });
+
+  it('a team beats the first boss: opens the next area, calls out the Legendary, then rests 2 h', () => {
+    const w = fresh();
+    const team = [give(w, 'draugoth', 25, 4), give(w, 'velmor', 20, 4), give(w, 'gleckor', 25, 3)];
+    expect(w.wouldWin(team, 'boss', 'boss')).toBe(true);
+    expect(w.startFight(team, 'boss', 'boss').ok).toBe(true);
+    w.advance(120_000, T0);
+    expect(w.s.fight).toBeNull();
+    expect(w.s.unlocked).toBe(2);
+    expect(w.s.bossBeaten.ash).toBe(T0);
+    expect(w.s.spawns.some(x => x.sp === 'quorvex' && x.src === 'legend')).toBe(true);
+    expect(w.count('star')).toBeGreaterThan(0);
+    expect(w.travel('tide').ok).toBe(true);
+  });
+
+  it('a weak team loses to the boss and keeps its Greebles', () => {
+    const w = fresh();
+    const u = give(w, 'scrappling', 1);
+    expect(w.wouldWin([u], 'boss', 'boss')).toBe(false);
+    w.startFight([u], 'boss', 'boss'); w.advance(300_000, T0);
+    expect(w.s.unlocked).toBe(1); expect(w.get(u)).toBeDefined();
+  });
+
+  it('team win-check matches the real boss fight (within a little luck)', () => {
+    let agree = 0, total = 0;
+    for (const lv of [5, 10, 15, 20, 25, 30]) {
+      const w = fresh(lv);
+      const team = [give(w, 'draug', lv, 3), give(w, 'velm', lv, 3), give(w, 'skarnox', lv, 3)];
+      const guess = w.wouldWin(team, 'boss', 'boss');
+      w.startFight(team, 'boss', 'boss'); w.advance(600_000, T0);
+      total++; if ((w.s.stats.bosses > 0) === guess) agree++;
+    }
+    expect(agree).toBeGreaterThanOrEqual(total - 1);
+  });
+
+  it('patrol robots are tougher in later areas', () => {
+    const w = fresh(); w.s.unlocked = 4;
+    const ash = w.foe('drone', 'patrol')!.hp; w.travel('rust');
+    expect(w.foe('drone', 'patrol')!.hp).toBeGreaterThan(ash * 3);
+  });
+
+  it('camp upgrades: tents, bag, workbench, night watch, snare press', () => {
+    const w = fresh(); w.s.scrap = 1_000_000;
+    const slots = w.s.camp.length, bag = w.s.bagMax;
+    expect(w.buyUpgrade('tent').ok).toBe(true); expect(w.s.camp.length).toBe(slots + 1);
+    expect(w.buyUpgrade('bag').ok).toBe(true); expect(w.s.bagMax).toBe(bag + 10);
+    const u = give(w, 'gleck', 10); const before = w.yieldOf(w.get(u)!);
+    w.buyUpgrade('bench'); expect(w.yieldOf(w.get(u)!)).toBeGreaterThan(before);
+    w.buyUpgrade('away'); expect(w.offlineCap).toBe(RULES.offlineCapMs + 4 * HOUR);
+    w.buyUpgrade('press'); const sn = w.count('snare'); w.advance(HOUR, T0); expect(w.count('snare')).toBe(sn + 2);
+    for (let i = 0; i < 10; i++) w.buyUpgrade('tent');
+    expect(w.s.camp.length).toBeLessThanOrEqual(RULES.maxCampSlots);
+  });
+
+  it('0.2 saves (single-Greeble fight, no areas) carry over', () => {
+    const old = { version: 2, bag: [{ u: 'g1', sp: 'draug', lv: 12, xp: 0, stars: 2, prism: false }], camp: [null, null, null, null],
+      fight: { u: 'g1', robot: 'drone', hp: 30, maxHp: 40, robotHp: 5, robotMax: 16, carry: 0, wreck: false },
+      spawns: [{ id: 'w9', sp: 'ashpup', lv: 2, stars: 1, prism: false, src: 'wild', at: T0, until: T0 + HOUR, x: .5, y: .5 }], items: { snare: 5 } };
+    const s = migrate(old, T0);
+    expect(s.fight?.team[0].u).toBe('g1'); expect(s.fight?.kind).toBe('patrol');
+    expect(s.spawns[0].reg).toBe('ash');
+    const w = new World(s); w.advance(5000, T0);
+    expect(w.s.fight).toBeNull(); expect(w.s.stats.wins).toBe(1);
   });
 });

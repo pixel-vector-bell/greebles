@@ -2,22 +2,25 @@ import {
   BASE_POWER, CATCH_BASE, EVO_ITEMS, FLEE, ITEMS, MORPHS, REWARDS, RARITIES, ROBOTS, RULES, SELL, SNARE_MULT, SPAWNABLE,
   STAR_WEIGHTS, START_ITEMS, THROW_MULT, TIER_WEIGHT, TREAT_MULT, WILD_MAX_LV,
   craterAt, hasMorph, isNight, morph, robot, stormAt, xpNeed,
-  type Evo, type ItemId, type Morph, type Rarity, type Role, type SnareId,
+  REGIONS, BOSS_REMATCH_MS, TEAM_MAX, UPGRADES, PRESS_MS_PER_SNARE, region, regionIndex, robotIn,
+  type Evo, type ItemId, type Morph, type Rarity, type RegionId, type Role, type SnareId, type UpgradeId,
 } from './content';
 import { nextRandom } from './rng';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export interface Greeble { u: string; sp: string; lv: number; xp: number; stars: number; prism: boolean; caughtAt?: number }
-export type SpawnSrc = 'wild' | 'crater' | 'beacon' | 'wreck' | 'mythic';
-export interface Spawn { id: string; sp: string; lv: number; stars: number; prism: boolean; src: SpawnSrc; at: number; until: number; x: number; y: number }
+export type SpawnSrc = 'wild' | 'crater' | 'beacon' | 'wreck' | 'mythic' | 'legend';
+export interface Spawn { id: string; sp: string; lv: number; stars: number; prism: boolean; src: SpawnSrc; at: number; until: number; x: number; y: number; reg: RegionId }
 export interface Encounter { spawn: string; treat: boolean; throws: number }
-export interface Fight { u: string; robot: string; hp: number; maxHp: number; robotHp: number; robotMax: number; carry: number; wreck: boolean }
+export type FightKind = 'patrol' | 'wreck' | 'boss';
+export interface Fighter { u: string; hp: number; maxHp: number }
+export interface Fight { team: Fighter[]; robot: string; robotHp: number; robotMax: number; carry: number; kind: FightKind; reg: RegionId; /** convenience: first fighter */ u: string }
 export interface Wreck { robot: string; until: number }
 
 export interface Stats {
   caught: number; thrown: number; fled: number; prisms: number; sold: number; grafts: number; evolved: number;
-  wins: number; losses: number; wrecks: number; scrapEarned: number; perfects: number;
+  wins: number; losses: number; wrecks: number; scrapEarned: number; perfects: number; bosses: number;
 }
 
 export interface GameState {
@@ -41,6 +44,13 @@ export interface GameState {
   wreck: Wreck | null;
   nextWreckAt: number;
   enc: Encounter | null;
+  /** The area you're exploring right now, and how many areas are open. */
+  region: RegionId;
+  unlocked: number;
+  /** When each area's boss was last beaten (0 = never). */
+  bossBeaten: Partial<Record<RegionId, number>>;
+  upgrades: Partial<Record<UpgradeId, number>>;
+  pressCarry: number;
   /** Kinds met in the wilds (or owned). */
   seen: Record<string, true>;
   /** Kinds ever owned. */
@@ -52,7 +62,7 @@ export interface GameState {
   tips: Record<string, true>;
 }
 
-const freshStats = (): Stats => ({ caught: 0, thrown: 0, fled: 0, prisms: 0, sold: 0, grafts: 0, evolved: 0, wins: 0, losses: 0, wrecks: 0, scrapEarned: 0, perfects: 0 });
+const freshStats = (): Stats => ({ caught: 0, thrown: 0, fled: 0, prisms: 0, sold: 0, grafts: 0, evolved: 0, wins: 0, losses: 0, wrecks: 0, scrapEarned: 0, perfects: 0, bosses: 0 });
 
 export function newGame(seed = (Math.random() * 2 ** 31) | 0, now = Date.now()): GameState {
   const s: GameState = {
@@ -61,6 +71,7 @@ export function newGame(seed = (Math.random() * 2 ** 31) | 0, now = Date.now()):
     items: { ...START_ITEMS },
     spawns: [], wildClock: now, nextAmbientAt: now + RULES.ambientMinMs, nextCraterAt: 0, nextBeaconAt: 0, beaconUntil: 0,
     wreck: null, nextWreckAt: now + RULES.wreckFirstMs, enc: null,
+    region: 'ash', unlocked: 1, bossBeaten: {}, upgrades: {}, pressCarry: 0,
     seen: {}, caught: {}, prismCaught: {}, claimed: {}, stats: freshStats(), lastSeen: now, tips: {},
   };
   // A few Greebles are already out there on day one.
@@ -84,6 +95,8 @@ export type GameEvent =
   | { t: 'canEvolve'; u: string; sp: string }
   | { t: 'fightWon'; sp: string; robot: string; scrap: number; loot: Partial<Record<ItemId, number>>; wreck: boolean }
   | { t: 'fightLost'; sp: string; robot: string; wreck: boolean }
+  | { t: 'bossWon'; reg: RegionId; first: boolean; scrap: number; unlocked?: RegionId; loot: Partial<Record<ItemId, number>> }
+  | { t: 'bossLost'; reg: RegionId }
   | { t: 'wreck'; robot: string }
   | { t: 'reward'; id: string; label: string }
   | { t: 'beacon' };
@@ -110,13 +123,21 @@ export class World {
   get(u: string) { return this.s.bag.find(g => g.u === u); }
   spawn(id: string) { return this.s.spawns.find(x => x.id === id); }
   inCamp(u: string) { return this.s.camp.includes(u); }
-  busy(u: string) { return this.inCamp(u) || this.s.fight?.u === u; }
+  busy(u: string) { return this.inCamp(u) || this.fighting(u); }
+  fighting(u: string) { return !!this.s.fight?.team.some(f => f.u === u); }
+  get reg() { return region(this.s.region); }
+  up(id: UpgradeId) { return this.s.upgrades[id] ?? 0; }
+  get offlineCap() { return RULES.offlineCapMs + this.up('away') * 4 * 60 * 60 * 1000; }
+  isOpen(id: RegionId) { return regionIndex(id) < this.s.unlocked; }
+  bossReadyAt(id: RegionId) { const b = this.s.bossBeaten[id]; return b ? b + BOSS_REMATCH_MS : 0; }
   count(item: ItemId) { return this.s.items[item] ?? 0; }
   private give(item: ItemId, n: number) { this.s.items[item] = this.count(item) + n; }
   quality(g: { stars: number; prism: boolean }) { return (1 + (g.stars - 1) * 0.1) * (g.prism ? 1.2 : 1); }
   power(g: Greeble) { const m = morph(g.sp); return Math.round((BASE_POWER[m.rarity] + (m.stage - 1) * 2 + g.lv + (m.role === 'fight' ? 2 : 0)) * this.quality(g)); }
   fighterHp(g: Greeble) { return 10 + this.power(g) * 2; }
-  yieldOf(g: Greeble) { const m = morph(g.sp); return Math.round((1 + Math.floor(g.lv / 4) + (m.stage - 1) + (m.role === 'fight' ? 1 : 0)) * this.quality(g) * 10) / 10; }
+  yieldOf(g: Greeble) { const m = morph(g.sp); return Math.round((1 + Math.floor(g.lv / 4) + (m.stage - 1) + (m.role === 'fight' ? 1 : 0)) * this.quality(g) * (1 + this.up('bench') * 0.1) * 10) / 10; }
+  /** Bosses: everyone can help, but only Skirmish Greebles hit at full power. */
+  teamPower(g: Greeble) { return Math.max(1, Math.round(this.power(g) * (morph(g.sp).role === 'fight' ? 1 : 0.6))); }
   sellValue(g: Greeble) { return Math.round(SELL[morph(g.sp).rarity] * g.lv * (g.prism ? 5 : 1)); }
   get campYield() { return Math.round(this.s.camp.reduce((n, u) => { const g = u ? this.get(u) : undefined; return n + (g ? this.yieldOf(g) : 0); }, 0) * 10) / 10; }
   get caughtCount() { return Object.keys(this.s.caught).length; }
@@ -153,7 +174,10 @@ export class World {
   /** Pick a kind to spawn. `role` boosts one caste (Glow Crater); `rareBoost` shifts odds up (robot wrecks). */
   rollKind(t: number, opts: { role?: Role; rareBoost?: number } = {}): Morph {
     const night = isNight(t), storm = !!stormAt(t)?.on;
-    const pool = SPAWNABLE.filter(m => (!m.nightOnly || night) && m.rarity !== 'mythic');
+    const reg = this.reg;
+    const pool = SPAWNABLE.filter(m => (!m.nightOnly || night) && m.rarity !== 'mythic' && m.rarity !== 'legendary' && reg.kinds.includes(m.id));
+    // An area's Legendary only roams once you've beaten that area's boss.
+    if (this.s.bossBeaten[reg.id]) pool.push(morph(reg.legendary));
     const perTier = new Map<Rarity, number>();
     for (const m of pool) perTier.set(m.rarity, (perTier.get(m.rarity) ?? 0) + 1);
     const weights = pool.map(m => {
@@ -172,14 +196,14 @@ export class World {
     const m = sp ? morph(sp) : this.rollKind(t, opts);
     const lifeMs = life ?? (src === 'wild' ? RULES.ambientLifeMs : src === 'beacon' ? RULES.beaconLifeMs : src === 'wreck' ? RULES.wreckSpawnLifeMs : RULES.ambientLifeMs);
     const x: Spawn = {
-      id: this.uid('w'), sp: m.id, lv: 1 + Math.floor(this.rand() * WILD_MAX_LV[m.rarity]), stars: this.rollStars(),
-      prism: this.rand() < RULES.prismOdds, src, at: t, until: t + lifeMs, x: 0, y: 0,
+      id: this.uid('w'), sp: m.id, lv: Math.min(RULES.maxLevel, 1 + Math.floor(this.rand() * WILD_MAX_LV[m.rarity]) + this.reg.lvl), stars: this.rollStars(),
+      prism: this.rand() < RULES.prismOdds, src, at: t, until: t + lifeMs, x: 0, y: 0, reg: this.s.region,
     };
     // spread them out so tiles don't sit on top of each other (best of a few tries)
     let best = { x: 0.5, y: 0.5, d: -1 };
     for (let i = 0; i < 12; i++) {
       const p = { x: 0.12 + this.rand() * 0.76, y: 0.14 + this.rand() * 0.7 };
-      const d = this.s.spawns.reduce((m, o) => Math.min(m, Math.hypot((o.x - p.x) * 1.2, o.y - p.y)), 9);
+      const d = this.here.reduce((m, o) => Math.min(m, Math.hypot((o.x - p.x) * 1.2, o.y - p.y)), 9);
       if (d > best.d) best = { ...p, d };
       if (d > 0.22) break;
     }
@@ -188,7 +212,18 @@ export class World {
     this.emit({ t: 'spawn', src, sp: x.sp, prism: x.prism });
     return x;
   }
-  private countSrc(src: SpawnSrc) { return this.s.spawns.filter(x => x.src === src).length; }
+  /** Greebles waiting in the area you're in. */
+  get here() { return this.s.spawns.filter(x => x.reg === this.s.region); }
+  private countSrc(src: SpawnSrc) { return this.here.filter(x => x.src === src).length; }
+
+  /** Walk to another area. Greebles you leave behind stay there until they wander off. */
+  travel(id: RegionId): ActionResult {
+    if (!this.isOpen(id)) return fail(`Beat the ${REGIONS[regionIndex(id) - 1]?.boss.name ?? 'boss'} to open ${region(id).name}.`);
+    if (this.s.enc) return fail('Finish catching first.');
+    if (this.s.fight?.kind === 'boss') return fail('Finish the boss fight first.');
+    this.s.region = id;
+    return OK;
+  }
 
   /** Bring the wilds up to real time `now`: Greebles wander in and out, hot spots switch on and off. */
   updateWilds(now: number) {
@@ -207,7 +242,7 @@ export class World {
   private expire(t: number) {
     const s = this.s;
     s.spawns = s.spawns.filter(x => x.until > t || s.enc?.spawn === x.id);
-    if (s.wreck && s.wreck.until <= t && !(s.fight?.wreck)) s.wreck = null;
+    if (s.wreck && s.wreck.until <= t && s.fight?.kind !== 'wreck') s.wreck = null;
   }
   private wildStep(t: number) {
     const s = this.s;
@@ -228,7 +263,7 @@ export class World {
       s.nextBeaconAt = t + this.between(RULES.hotMinMs, RULES.hotMaxMs);
     }
     // The Starborn Greeble: very rarely, on a stormy night.
-    if (isNight(t) && stormAt(t)?.on && !s.spawns.some(x => x.src === 'mythic') && this.rand() < 1 / 400) this.addSpawn(t, 'mythic', 'starborn', 20 * 60_000);
+    if (isNight(t) && stormAt(t)?.on && !this.here.some(x => x.src === 'mythic') && this.rand() < 1 / 400) this.addSpawn(t, 'mythic', 'starborn', 20 * 60_000);
     if (!s.wreck && t >= s.nextWreckAt) {
       let r = this.rand() * ROBOTS.reduce((a, b) => a + b.weight, 0);
       const bot = ROBOTS.find(b => (r -= b.weight) < 0) ?? ROBOTS[0];
@@ -336,7 +371,7 @@ export class World {
   // ── the bag ───────────────────────────────────────────────
   sell(u: string): ActionResult {
     const g = this.get(u); if (!g) return fail('Not in the bag.');
-    if (this.s.fight?.u === u) return fail('It is fighting right now.');
+    if (this.fighting(u)) return fail('It is fighting right now.');
     const scrap = this.sellValue(g);
     this.s.camp = this.s.camp.map(x => (x === u ? null : x));
     this.s.bag = this.s.bag.filter(x => x.u !== u);
@@ -381,7 +416,7 @@ export class World {
   // ── camp ──────────────────────────────────────────────────
   assign(u: string, slot?: number): ActionResult {
     if (!this.get(u)) return fail('Not in the bag.');
-    if (this.s.fight?.u === u) return fail('It is fighting right now.');
+    if (this.fighting(u)) return fail('It is fighting right now.');
     const i = slot ?? this.s.camp.findIndex(x => !x);
     if (i < 0 || i >= this.s.camp.length) return fail('Camp is full.');
     this.s.camp = this.s.camp.map(x => (x === u ? null : x));
@@ -395,54 +430,133 @@ export class World {
   }
 
   // ── robots ────────────────────────────────────────────────
-  wouldWin(g: Greeble, robotId: string, wreck = false): boolean {
-    const r = robot(robotId); if (!r) return false;
-    const pow = Math.max(1, this.power(g)), hurt = Math.max(1, r.atk - Math.floor(g.lv / 5));
-    let hp = this.fighterHp(g), rhp = Math.round(r.hp * (wreck ? RULES.wreckHpMult : 1));
-    for (;;) { rhp -= pow; if (rhp <= 0) return true; hp -= hurt; if (hp <= 0) return false; }
+  /** Robot stats for a fight in the current area. */
+  foe(robotId: string, kind: FightKind): { name: string; hp: number; atk: number; xp: number; scrap: number } | null {
+    const reg = this.reg;
+    if (kind === 'boss') return { name: reg.boss.name, hp: reg.boss.hp, atk: reg.boss.atk, xp: reg.boss.xp, scrap: reg.boss.scrap };
+    const r = robot(robotId); if (!r) return null;
+    const st = robotIn(r, reg);
+    const wreck = kind === 'wreck' ? RULES.wreckHpMult : 1;
+    return { name: r.name, hp: Math.round(st.hp * wreck), atk: st.atk, xp: st.xp, scrap: Math.round((4 + ROBOTS.indexOf(r) * 6) * reg.mult) };
   }
-  startFight(u: string, robotId: string, wreck = false): ActionResult {
-    const g = this.get(u), r = robot(robotId);
-    if (!g || !r) return fail('Pick a Greeble and a robot.');
+  private teamOf(us: string[]): Greeble[] | string {
+    const ids = [...new Set(us)].slice(0, TEAM_MAX);
+    const team = ids.map(u => this.get(u)).filter(Boolean) as Greeble[];
+    if (!team.length) return 'Pick a Greeble.';
+    if (team.some(g => this.inCamp(g.u))) return 'Bench them from camp first.';
+    return team;
+  }
+  /** Simulate a fight on copies: would this team win? */
+  wouldWin(us: string | string[], robotId: string, kind: FightKind | boolean = 'patrol'): boolean {
+    const k: FightKind = typeof kind === 'boolean' ? (kind ? 'wreck' : 'patrol') : kind;
+    const team = this.teamOf(Array.isArray(us) ? us : [us]); const foe = this.foe(robotId, k);
+    if (typeof team === 'string' || !foe) return false;
+    const hp = team.map(g => this.fighterHp(g));
+    let rhp = foe.hp, turn = 0;
+    for (let guard = 0; guard < 10_000; guard++) {
+      for (let i = 0; i < team.length; i++) if (hp[i] > 0) rhp -= k === 'boss' ? this.teamPower(team[i]) : Math.max(1, this.power(team[i]));
+      if (rhp <= 0) return true;
+      const alive = hp.map((h, i) => (h > 0 ? i : -1)).filter(i => i >= 0);
+      const t = alive[turn++ % alive.length];
+      hp[t] -= Math.max(1, foe.atk - Math.floor(team[t].lv / 5));
+      if (hp.every(h => h <= 0)) return false;
+    }
+    return false;
+  }
+  startFight(us: string | string[], robotId: string, kind: FightKind | boolean = 'patrol'): ActionResult {
+    const k: FightKind = typeof kind === 'boolean' ? (kind ? 'wreck' : 'patrol') : kind;
     if (this.s.fight) return fail('A fight is already on.');
-    if (morph(g.sp).role !== 'fight') return fail('Only Skirmish Greebles fight robots.');
-    if (this.inCamp(u)) return fail('Bench it from camp first.');
-    if (wreck && (!this.s.wreck || this.s.wreck.robot !== robotId)) return fail('The wreck is gone.');
-    const hp = this.fighterHp(g), rhp = Math.round(r.hp * (wreck ? RULES.wreckHpMult : 1));
-    this.s.fight = { u, robot: r.id, hp, maxHp: hp, robotHp: rhp, robotMax: rhp, carry: 0, wreck };
+    const team = this.teamOf(Array.isArray(us) ? us : [us]);
+    if (typeof team === 'string') return fail(team);
+    if (k !== 'boss') {
+      if (team.length > 1) return fail('Patrols are one on one.');
+      if (morph(team[0].sp).role !== 'fight') return fail('Only Skirmish Greebles fight robots.');
+    }
+    if (k === 'wreck' && (!this.s.wreck || this.s.wreck.robot !== robotId)) return fail('The wreck is gone.');
+    if (k === 'boss' && Date.now() < this.bossReadyAt(this.s.region)) return fail('The boss is still being rebuilt. Come back later.');
+    const foe = this.foe(robotId, k)!;
+    this.s.fight = {
+      team: team.map(g => { const hp = this.fighterHp(g); return { u: g.u, hp, maxHp: hp }; }), u: team[0].u,
+      robot: k === 'boss' ? 'boss' : robotId, robotHp: foe.hp, robotMax: foe.hp, carry: 0, kind: k, reg: this.s.region,
+    };
     return OK;
   }
   private fightRound(now: number) {
-    const f = this.s.fight!; const g = this.get(f.u); const r = robot(f.robot);
-    if (!g || !r) { this.s.fight = null; return; }
-    f.robotHp -= Math.max(1, this.power(g));
+    const f = this.s.fight!;
+    const reg0 = this.s.region; this.s.region = f.reg; // fight in the area it started in
+    try { this.fightRoundIn(f, now); } finally { this.s.region = reg0; }
+  }
+  private fightRoundIn(f: Fight, now: number) {
+    const foe = this.foe(f.robot, f.kind);
+    const alive = f.team.filter(x => x.hp > 0 && this.get(x.u));
+    if (!foe || !alive.length) { this.s.fight = null; return; }
+    for (const x of alive) { const g = this.get(x.u)!; f.robotHp -= f.kind === 'boss' ? this.teamPower(g) : Math.max(1, this.power(g)); }
+    const lead = this.get(alive[0].u)!;
     if (f.robotHp <= 0) {
-      this.addXp(g, Math.round((r.xp + 8) * (f.wreck ? 1.5 : 1)));
-      const scrap = Math.round((4 + g.lv + ROBOTS.indexOf(r) * 6) * (f.wreck ? 2 : 1));
-      this.earn(scrap);
-      const loot: Partial<Record<ItemId, number>> = { snare: 2 + Math.floor(this.rand() * 3) };
-      if (this.rand() < 0.25 + ROBOTS.indexOf(r) * 0.15) loot.good = 1;
-      if (this.rand() < 0.03 + ROBOTS.indexOf(r) * 0.04 + (f.wreck ? 0.1 : 0)) loot[EVO_ITEMS[Math.floor(this.rand() * EVO_ITEMS.length)]] = 1;
-      if (f.wreck && this.rand() < 0.5) loot.great = 1;
-      for (const [k, v] of Object.entries(loot) as [ItemId, number][]) this.give(k, v);
-      this.s.stats.wins++;
-      const wasWreck = f.wreck;
       this.s.fight = null;
-      if (wasWreck) {
+      this.s.stats.wins++;
+      const share = Math.round((foe.xp + 8) * (f.kind === 'wreck' ? 1.5 : 1) / (f.kind === 'boss' ? 1 : alive.length));
+      for (const x of f.team) { const g = this.get(x.u); if (g) this.addXp(g, share); }
+      const loot: Partial<Record<ItemId, number>> = {};
+      const add = (k: ItemId, n: number) => { loot[k] = (loot[k] ?? 0) + n; };
+      if (f.kind === 'boss') {
+        const reg = region(f.reg); const first = !this.s.bossBeaten[f.reg];
+        const scrap = reg.boss.scrap * (first ? 1 : 0.5);
+        this.earn(scrap);
+        this.s.bossBeaten[f.reg] = now;
+        this.s.stats.bosses++;
+        add('great', first ? 5 : 2); add('beacon', 1);
+        if (first) { add('star', 1); add(EVO_ITEMS[Math.floor(this.rand() * EVO_ITEMS.length)], 1); }
+        for (const [k, v] of Object.entries(loot) as [ItemId, number][]) this.give(k, v);
+        let unlocked: RegionId | undefined;
+        const idx = regionIndex(f.reg);
+        if (first && idx + 1 < REGIONS.length && this.s.unlocked <= idx + 1) { this.s.unlocked = idx + 2; unlocked = REGIONS[idx + 1].id; }
+        // The area's Legendary shows itself right away (once per win).
+        const reg0 = this.s.region; this.s.region = f.reg;
+        this.addSpawn(now, 'legend', reg.legendary, 30 * 60_000);
+        this.s.region = reg0;
+        this.emit({ t: 'bossWon', reg: f.reg, first, scrap, unlocked, loot });
+        return;
+      }
+      const ri = ROBOTS.findIndex(r => r.id === f.robot);
+      const scrap = Math.round((foe.scrap + lead.lv) * (f.kind === 'wreck' ? 2 : 1));
+      this.earn(scrap);
+      add('snare', 2 + Math.floor(this.rand() * 3));
+      if (this.rand() < 0.25 + ri * 0.15) add('good', 1);
+      if (this.rand() < 0.03 + ri * 0.04 + (f.kind === 'wreck' ? 0.1 : 0)) add(EVO_ITEMS[Math.floor(this.rand() * EVO_ITEMS.length)], 1);
+      if (f.kind === 'wreck' && this.rand() < 0.5) add('great', 1);
+      for (const [k, v] of Object.entries(loot) as [ItemId, number][]) this.give(k, v);
+      if (f.kind === 'wreck') {
         this.s.stats.wrecks++;
         this.s.wreck = null;
         for (let i = 0; i < RULES.wreckBurst; i++) this.addSpawn(now, 'wreck', undefined, RULES.wreckSpawnLifeMs, { rareBoost: 3 });
       }
-      this.emit({ t: 'fightWon', sp: g.sp, robot: r.id, scrap, loot, wreck: wasWreck });
+      this.emit({ t: 'fightWon', sp: lead.sp, robot: f.robot, scrap, loot, wreck: f.kind === 'wreck' });
       return;
     }
-    f.hp -= Math.max(1, r.atk - Math.floor(g.lv / 5));
-    if (f.hp <= 0) {
+    // the robot hits one Greeble (round-robin over whoever is still standing)
+    const tgt = alive[Math.floor(this.rand() * alive.length)];
+    tgt.hp -= Math.max(1, foe.atk - Math.floor(this.get(tgt.u)!.lv / 5));
+    if (f.team.every(x => x.hp <= 0)) {
       this.s.stats.losses++;
-      const wasWreck = f.wreck;
       this.s.fight = null;
-      this.emit({ t: 'fightLost', sp: g.sp, robot: r.id, wreck: wasWreck });
+      if (f.kind === 'boss') this.emit({ t: 'bossLost', reg: f.reg });
+      else this.emit({ t: 'fightLost', sp: lead.sp, robot: f.robot, wreck: f.kind === 'wreck' });
     }
+  }
+
+  // ── camp upgrades ─────────────────────────────────────────
+  upgradePrice(id: UpgradeId): number | null { const d = UPGRADES.find(u => u.id === id)!; return d.prices[this.up(id)] ?? null; }
+  buyUpgrade(id: UpgradeId): ActionResult {
+    const price = this.upgradePrice(id);
+    if (price === null) return fail('Already maxed out.');
+    if (id === 'tent' && this.s.camp.length >= RULES.maxCampSlots) return fail('Camp already has 8 spots.');
+    if (this.s.scrap < price) return fail(`Needs ${price.toLocaleString('en-US')} scrap.`);
+    this.s.scrap -= price;
+    this.s.upgrades[id] = this.up(id) + 1;
+    if (id === 'tent') this.s.camp.push(null);
+    if (id === 'bag') this.s.bagMax += 10;
+    return OK;
   }
 
   private campPayout() {
@@ -458,6 +572,12 @@ export class World {
     if (!(ms > 0)) return;
     this.s.campCarry += ms;
     while (this.s.campCarry >= RULES.campTickMs) { this.s.campCarry -= RULES.campTickMs; this.campPayout(); }
+    const press = this.up('press');
+    if (press) {
+      this.s.pressCarry += ms * press;
+      const made = Math.floor(this.s.pressCarry / PRESS_MS_PER_SNARE);
+      if (made) { this.s.pressCarry -= made * PRESS_MS_PER_SNARE; this.give('snare', made); }
+    }
     let f = this.s.fight;
     if (f) {
       f.carry += ms;
@@ -467,16 +587,16 @@ export class World {
 
   /** Offline catch-up: camp (capped) + the wilds. Returns what happened for the welcome-back card. */
   catchUp(ms: number, now = Date.now()): { ms: number; scrap: number; levels: number; waiting: number } {
-    const capped = Math.min(Math.max(0, ms), RULES.offlineCapMs);
+    const capped = Math.min(Math.max(0, ms), this.offlineCap);
     const before = this.s.scrap;
     this.advance(capped, now);
     this.updateWilds(now);
     const levels = this.drain().filter(e => e.t === 'level').length;
-    return { ms: capped, scrap: this.s.scrap - before, levels, waiting: this.s.spawns.length };
+    return { ms: capped, scrap: this.s.scrap - before, levels, waiting: this.here.length };
   }
 }
 
-/** Old (0.1) or hand-edited saves are cleaned up here so a bad blob can never crash the game. */
+/** Old (0.1 / 0.2) or hand-edited saves are cleaned up here so a bad blob can never crash the game. */
 export function migrate(raw: any, now = Date.now()): GameState {
   const fresh = newGame(undefined, now);
   if (!raw || typeof raw !== 'object') return fresh;
@@ -497,9 +617,17 @@ export function migrate(raw: any, now = Date.now()): GameState {
   if (Array.isArray(raw.camp)) raw.camp.slice(0, slots).forEach((u: any, i: number) => { if (typeof u === 'string' && ids.has(u) && !camp.includes(u)) camp[i] = u; });
   let fight: Fight | null = null;
   const f = raw.fight;
-  if (f && ids.has(f.u) && robot(f.robot) && !camp.includes(f.u)) {
-    const r = robot(f.robot)!;
-    fight = { u: f.u, robot: f.robot, hp: num(f.hp, 1), maxHp: num(f.maxHp, 1), robotHp: num(f.robotHp, 1), robotMax: num(f.robotMax, r.hp), carry: Math.max(0, num(f.carry, 0)), wreck: f.wreck === true };
+  const regIds = REGIONS.map(r => r.id) as string[];
+  if (f && typeof f === 'object') {
+    // 0.2 fights had a single Greeble ({u, hp, maxHp, wreck}); 0.3 has a team.
+    const team: Fighter[] = (Array.isArray(f.team) ? f.team : [{ u: f.u, hp: f.hp, maxHp: f.maxHp }])
+      .filter((x: any) => x && ids.has(x.u) && !camp.includes(x.u)).slice(0, TEAM_MAX)
+      .map((x: any) => ({ u: x.u, hp: num(x.hp, 1), maxHp: num(x.maxHp, 1) }));
+    const kind: FightKind = f.kind === 'boss' || f.kind === 'wreck' ? f.kind : f.wreck === true ? 'wreck' : 'patrol';
+    if (team.length && (kind === 'boss' || robot(f.robot))) {
+      fight = { team, u: team[0].u, robot: kind === 'boss' ? 'boss' : f.robot, robotHp: num(f.robotHp, 1), robotMax: num(f.robotMax, 1),
+        carry: Math.max(0, num(f.carry, 0)), kind, reg: (regIds.includes(f.reg) ? f.reg : 'ash') as RegionId };
+    }
   }
   const known = (o: any) => { const r: Record<string, true> = {}; for (const k of Object.keys(o && typeof o === 'object' ? o : {})) if (hasMorph(k)) r[k] = true; return r; };
   const seen = known(raw.seen), caught = known(raw.caught ?? raw.seen), prismCaught = known(raw.prismCaught);
@@ -511,7 +639,8 @@ export function migrate(raw: any, now = Date.now()): GameState {
   const spawns: Spawn[] = Array.isArray(raw.spawns)
     ? raw.spawns.filter((x: any) => x && typeof x.id === 'string' && hasMorph(x.sp) && num(x.until, 0) > 0).slice(0, 40)
         .map((x: any) => ({ id: x.id, sp: x.sp, lv: Math.max(1, num(x.lv, 1) | 0), stars: Math.min(5, Math.max(1, num(x.stars, 1) | 0)), prism: x.prism === true,
-          src: (['wild', 'crater', 'beacon', 'wreck', 'mythic'].includes(x.src) ? x.src : 'wild') as SpawnSrc, at: num(x.at, now), until: num(x.until, now), x: num(x.x, 0.5), y: num(x.y, 0.5) }))
+          src: (['wild', 'crater', 'beacon', 'wreck', 'mythic', 'legend'].includes(x.src) ? x.src : 'wild') as SpawnSrc, at: num(x.at, now), until: num(x.until, now), x: num(x.x, 0.5), y: num(x.y, 0.5),
+          reg: (regIds.includes(x.reg) ? x.reg : 'ash') as RegionId }))
     : fresh.spawns;
   const sid = new Set(spawns.map(x => x.id));
   const enc: Encounter | null = raw.enc && sid.has(raw.enc.spawn) ? { spawn: raw.enc.spawn, treat: raw.enc.treat === true, throws: Math.max(0, num(raw.enc.throws, 0) | 0) } : null;
@@ -522,7 +651,14 @@ export function migrate(raw: any, now = Date.now()): GameState {
   const claimed: Record<string, true> = {};
   for (const k of Object.keys(raw.claimed ?? {})) if (REWARDS.some(r => r.id === k)) claimed[k] = true;
   const wildClock = num(raw.wildClock, now);
+  const unlocked = Math.min(REGIONS.length, Math.max(1, num(raw.unlocked, 1) | 0));
+  const reg = (regIds.includes(raw.region) && regIds.indexOf(raw.region) < unlocked ? raw.region : 'ash') as RegionId;
+  const bossBeaten: Partial<Record<RegionId, number>> = {};
+  for (const id of regIds) { const v = num(raw.bossBeaten?.[id], 0); if (v > 0) bossBeaten[id as RegionId] = v; }
+  const upgrades: Partial<Record<UpgradeId, number>> = {};
+  for (const u of UPGRADES) { const v = Math.min(u.prices.length, Math.max(0, num(raw.upgrades?.[u.id], 0) | 0)); if (v) upgrades[u.id] = v; }
   return {
+    region: reg, unlocked, bossBeaten, upgrades, pressCarry: Math.max(0, num(raw.pressCarry, 0)),
     version: SAVE_VERSION,
     rng: num(raw.rng, fresh.rng) | 0,
     nextId: Math.max(num(raw.nextId, 1), maxId + 1),
