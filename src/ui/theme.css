@@ -425,3 +425,39 @@ button:disabled { cursor: default; opacity: .45; }
 .gr-app.desk .gr-team .gr-pick, .gr-app.desk .gr-team button { font-size: 13px; }
 .gr-app.desk .gr-team .gr-badge { transform: scale(1.25); margin: 6px 0; }
 .gr-nest .gr-empty, .gr-nest p.gr-dim:last-child { text-align: center; }
+
+/* 0.12: sub-menus inside each tab (no more long pages / sideways columns) */
+.gr-subtabs { display: grid; gap: 4px; background: #131a24; border: 1px solid var(--line); border-radius: 12px; padding: 4px; margin-bottom: 10px; position: sticky; top: -12px; z-index: 5; }
+.gr-subtabs button { position: relative; border: 0; background: none; color: #a6aec8; border-radius: 9px; padding: 9px 2px; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gr-subtabs button.on { background: #2b3856; color: var(--gold); box-shadow: inset 0 0 0 1px #4a5a80; }
+.gr-subdot { position: absolute; top: 5px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); }
+@media (max-width: 360px) { .gr-subtabs button { font-size: 12px; } }
+.gr-app.desk .gr-subtabs { top: -16px; }
+.gr-app.desk .gr-subtabs button { font-size: 14px; padding: 10px 4px; }
+
+/* the old wide-screen "two columns" layout pushed cards off to the right: gone */
+@media (min-width: 1700px) {
+  .gr-app.desk .gr-pane .gr-main { columns: auto !important; column-gap: normal; }
+  .gr-app.desk .gr-pane .gr-main > * { display: block; max-width: 880px; }
+}
+.gr-main { overflow-x: hidden; }
+
+/* patrol: the 3 robot buttons sit in one even row */
+.gr-btns.robo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.gr-btns.robo .gr-tag.pow { grid-column: 1 / -1; justify-self: start; }
+.gr-btns.robo .gr-btn { width: 100%; padding: 8px 2px; }
+
+/* graft picker */
+.gr-graft .gr-team { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); max-height: 30vh; overflow-y: auto; padding: 2px; }
+.gr-graft .gr-h3 { margin-top: 10px; }
+.gr-graft-pv { background: #161e2b; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin: 6px 0 10px; display: grid; gap: 3px; font-size: 14px; }
+.gr-graft .gr-btns { justify-content: flex-end; gap: 10px; }
+.gr-graft .gr-btns .gr-btn { min-width: 110px; padding: 10px 14px; }
+.gr-btn.o.solid { background: #c98a1c; color: #1a1205; font-weight: 800; border: 0; }
+.gr-graft .gr-sheet { overflow: auto; }
+.gr-sheet.tall.gr-graft { overflow-y: auto; max-height: 88%; }
+
+/* graft: tag which pick is which */
+.gr-graft .gr-team.feed .gr-pick.on { border-color: #e0a040; background: #3a2a14; }
+.gr-graft .gr-team .gr-pick.on::after { content: 'KEEP'; font-size: 9px; font-weight: 800; letter-spacing: .08em; color: var(--ok); }
+.gr-graft .gr-team.feed .gr-pick.on::after { content: 'FEED IN'; color: #e0a040; }

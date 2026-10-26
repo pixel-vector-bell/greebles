@@ -324,9 +324,19 @@ export class World {
   sellValue(g: Greeble) { return Math.round(SELL[morph(g.sp).rarity] * g.lv * (g.prism ? 5 : 1)); }
   get campYield() { return Math.round(this.s.camp.reduce((n, u) => { const g = u ? this.get(u) : undefined; return n + (g ? this.yieldOf(g) : 0); }, 0) * 10) / 10; }
   get caughtCount() { return Object.keys(this.s.caught).length; }
-  graftPartner(u: string) {
-    const g = this.get(u); if (!g) return undefined;
-    return this.s.bag.filter(x => x.u !== u && x.sp === g.sp && !this.busy(x.u)).sort((a, b) => a.stars - b.stars || a.lv - b.lv)[0];
+  /** Same-kind Greebles that could be fed into `u` (weakest first). */
+  graftPartners(u: string) {
+    const g = this.get(u); if (!g) return [];
+    return this.s.bag.filter(x => x.u !== u && x.sp === g.sp && !this.busy(x.u)).sort((a, b) => Number(a.prism) - Number(b.prism) || a.stars - b.stars || a.lv - b.lv);
+  }
+  graftPartner(u: string) { return this.graftPartners(u)[0]; }
+  /** What grafting `feed` into `keep` would do, without doing it. */
+  graftPreview(keep: Greeble, feed: Greeble) {
+    let lv = keep.lv, xp = keep.xp + 40 + feed.lv * 15;
+    while (lv < RULES.maxLevel && xp >= xpNeed(lv)) { xp -= xpNeed(lv); lv++; }
+    const sure = feed.stars > keep.stars ? feed.stars : null;
+    const chance = sure || keep.stars >= 5 ? 0 : feed.stars === keep.stars ? 0.35 : 0.12;
+    return { xp: 40 + feed.lv * 15, lvFrom: keep.lv, lvTo: lv, starsFrom: keep.stars, starsSure: sure, starChance: chance, prism: feed.prism && !keep.prism, wastesPrism: feed.prism && keep.prism };
   }
   /** Evolution options for this Greeble right now, with why each one is or isn't ready. */
   evoOptions(g: Greeble, now: number): { evo: Evo; ready: boolean; why: string }[] {
@@ -690,10 +700,10 @@ export class World {
   }
 
   /** Feed a duplicate in: big xp, and a chance to raise quality stars. */
-  graft(u: string): ActionResult {
+  graft(u: string, feedU?: string): ActionResult {
     const g = this.get(u); if (!g) return fail('Not in the bag.');
-    const other = this.graftPartner(u);
-    if (!other) return fail(`Needs another ${morph(g.sp).name} that isn't camping or fighting.`);
+    const other = feedU ? this.graftPartners(u).find(x => x.u === feedU) : this.graftPartner(u);
+    if (!other) return fail(feedU ? `That one can't be grafted in (it must be another free ${morph(g.sp).name}).` : `Needs another ${morph(g.sp).name} that isn't camping or fighting.`);
     this.s.bag = this.s.bag.filter(x => x.u !== other.u);
     const before = g.stars;
     if (other.stars > g.stars) g.stars = other.stars;

@@ -1,5 +1,11 @@
 # Greebles — What's New
 
+## 0.12.0 — Tidier menus & a real graft choice
+- 🗂️ Camp, Fight, Shop, Ship and the Guide each have a small menu at the top now (for example Workers / Nest / Upgrades), so you see one short page at a time instead of one very long one. A gold dot shows where something is ready.
+- 🖥️ On very wide screens, the right side used to spill cards off into hidden columns you had to slide sideways to reach. That's fixed: it's one straight column now.
+- 🧬 Grafting lets you choose now. Tap "Graft…", pick the Greeble to keep, then pick the copy to feed in. Before you confirm, it shows the new level and star odds, and it warns you if you're about to feed in the stronger one or a Prismatic.
+- 🤖 The three robot buttons on Patrol sit in one even row instead of wrapping.
+
 ## 0.11.1 — Five more touch-ups
 - 🎨 Tide Pup now wears a yellow raincoat and boots and no longer looks see-through.
 - 🎨 Drift Greeble is paler with a cloud on its head, so it's easy to tell apart from Tide Pup.

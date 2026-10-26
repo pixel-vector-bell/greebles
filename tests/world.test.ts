@@ -194,6 +194,22 @@ describe('evolving', () => {
     expect(w.get(a)!.lv).toBeGreaterThan(3);
     expect(w.s.bag.length).toBe(1);
   });
+
+  it('graft lets you pick which copy gets fed in', () => {
+    const w = fresh();
+    const keep = give(w, 'ashpup', 5, 2); const weak = give(w, 'ashpup', 2, 1); const strong = give(w, 'ashpup', 9, 4);
+    expect(w.graftPartners(keep).map(g => g.u)).toEqual([weak, strong]);
+    const pv = w.graftPreview(w.get(keep)!, w.get(strong)!);
+    expect(pv.starsSure).toBe(4); expect(pv.lvTo).toBeGreaterThan(5);
+    expect(w.graft(keep, strong).ok).toBe(true);
+    expect(w.get(strong)).toBeUndefined(); expect(w.get(weak)).toBeDefined();
+    expect(w.get(keep)!.stars).toBe(4);
+    expect(w.get(keep)!.lv).toBe(pv.lvTo);
+    // can't feed in a different kind, or itself
+    const other = give(w, 'tidling', 3, 1);
+    expect(w.graft(keep, other).ok).toBe(false);
+    expect(w.graft(keep, keep).ok).toBe(false);
+  });
 });
 
 describe('camp, shop and robots', () => {

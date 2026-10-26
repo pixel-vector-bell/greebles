@@ -21,7 +21,7 @@ const STEPS: Step[] = [
     done: w => w.s.stats.caught >= 1 },
   { title: 'Gotcha!', tab: 'camp', top: true, point: '.gr-sendbag .gr-btn.g', text: 'Nice catch! Now put it to work. Greebles in camp earn scrap and bring back materials, even while the game is closed. Tap "Camp" next to your Greeble.',
     done: w => w.s.camp.some(Boolean) },
-  { title: 'Your camp is working', tab: 'camp', point: '.gr-nest', text: 'Every 15 seconds your campers earn scrap. Dig Greebles find Ore, Trawl Greebles pull in Kelp and Skirmish Greebles salvage Gears. Later, put two of the same family in the Nest (glowing below) to get eggs.', next: 'Got it' },
+  { title: 'Your camp is working', tab: 'camp', point: '.gr-subtabs [data-k=nest]', text: 'Every 15 seconds your campers earn scrap. Dig Greebles find Ore, Trawl Greebles pull in Kelp and Skirmish Greebles salvage Gears. Later, open the Nest (glowing up top) and put two of the same family in it to get eggs.', next: 'Got it' },
   { title: 'Daily tasks', tab: 'wilds', point: '.gr-daily', text: 'Every day you get 3 small tasks here. Finish them for scrap and snares, plus a bonus when you finish all 3.', next: 'Nice' },
   { title: "You're all set!", text: 'Catch more Greebles, evolve them in the Bag, fight robots on the Fight tab, and fix your ship to get home. Each tab shows a quick tip the first time you open it. Have fun!', next: 'Start exploring' },
 ];
