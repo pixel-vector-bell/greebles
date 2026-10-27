@@ -1,5 +1,17 @@
 # Greebles — What's New
 
+## 0.13.0 — New rules: team, energy, candy & level caps (fresh start)
+- 🔄 The game was much too easy, so the rules changed from the ground up. Every save starts over, Field Guide included.
+- 🛡️ Your Team (Fight tab) is who fights. You start with 3 spots and can buy up to 6. Only the team gains xp. Campers work and rest, and they don't level up anymore.
+- ⚡ Every fight costs energy: 1 for a patrol, 2 for a wreck, 3 for a boss. A Greeble that gets knocked out loses all its energy. Energy comes back 1 every 40 minutes, or 1 every 10 minutes resting in camp. Tap "Swap" to send a tired Greeble to camp and bring a rested one in.
+- 🤖 Auto-patrol (on by default): your team fights a patrol every 2 minutes by itself, even while the game is closed. It stops when a Greeble is down to 3 energy, so you're always ready for a boss.
+- 🍬 Evolving needs the right level and candy. Each catch gives 5 candy for that Greeble's family (7 for 4★ or better, double for Prismatic). Hatching gives 8, and sending a Greeble home gives 2. The first evolution costs 25 candy and the second costs 60 (more for rare families).
+- 🔒 Levels stop at a cap until you beat the next area's boss: 12, then 20, 28, 34 and 40. Xp you earn at the cap is saved and pays out when the cap goes up. Wild Greebles are always a few levels under the cap, so you still have to train them.
+- 🦾 Bosses are much tougher and hit your whole team every round. A full team at the level cap with the right elements can win. A team from the area before can't.
+- 🔩 Scrap comes in much slower (camp, patrols and boss rematches all pay less), and camp upgrades cost about 3× more. There are two new upgrades: Bigger team and Bedrolls (energy comes back faster).
+- 🧬 Grafting is gone. Extra copies get sent home for candy instead, and a Greeble's stars are set when you catch it.
+- 👋 The walkthrough now covers the team, Auto-patrol, camp and candy.
+
 ## 0.12.0 — Tidier menus & a real graft choice
 - 🗂️ Camp, Fight, Shop, Ship and the Guide each have a small menu at the top now (for example Workers / Nest / Upgrades), so you see one short page at a time instead of one very long one. A gold dot shows where something is ready.
 - 🖥️ On very wide screens, the right side used to spill cards off into hidden columns you had to slide sideways to reach. That's fixed: it's one straight column now.
