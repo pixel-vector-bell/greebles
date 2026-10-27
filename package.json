@@ -1,8 +1,8 @@
 {
   "name": "greebles",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "private": true,
-  "description": "Greebles: stranded on a strange planet, befriend Greebles, camp them, graft them, break the robots. Ships inside the playzodark.io game center.",
+  "description": "Greebles: stranded on a strange planet, befriend Greebles, build a team, evolve them, break the robots. Ships inside the playzodark.io game center.",
   "type": "module",
   "scripts": {
     "dev": "vite",

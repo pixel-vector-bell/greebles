@@ -13,17 +13,24 @@ interface Step {
   next?: string;
   /** Put the coach card at the top so it doesn't cover what it points at. */
   top?: boolean;
+  /** Make sure there's a Greeble to catch (and snares to catch it with). */
+  seed?: boolean;
 }
 
 const STEPS: Step[] = [
   { title: 'Welcome, explorer!', text: 'Your ship crashed on a strange planet. The little natives here are called Greebles. They\'re friendly, and they\'ll help you survive, find scrap and fight off the robots. Let\'s catch your first one!', next: "Let's go" },
-  { title: 'Catch a Greeble', tab: 'wilds', point: '.gr-spawn', text: 'Greebles wander into the Wilds. Tap one to go after it. When the ring around it is small, tap Throw. The smaller the ring, the better your throw!',
+  { title: 'Catch a Greeble', tab: 'wilds', point: '.gr-spawn', seed: true, text: 'Greebles wander into the Wilds. Tap one to go after it. When the ring around it is small, tap Throw. The smaller the ring, the better your throw!',
     done: w => w.s.stats.caught >= 1 },
-  { title: 'Gotcha!', tab: 'camp', top: true, point: '.gr-sendbag .gr-btn.g', text: 'Nice catch! Now put it to work. Greebles in camp earn scrap and bring back materials, even while the game is closed. Tap "Camp" next to your Greeble.',
+  { title: 'Build your team', tab: 'fight', top: true, point: '.gr-teamadd .gr-btn.g', text: 'Nice catch! Your Team is who fights robots, and only the team gains xp. Tap "Add" to put your Greeble on the team.',
+    done: w => w.teamList.length > 0 },
+  { title: 'Auto-patrol', tab: 'fight', point: '.gr-auto', text: 'Auto-patrol is on: your team fights a robot every couple of minutes, even while the game is closed. Each fight costs ⚡ energy, and energy comes back over time.', next: 'Got it' },
+  { title: 'Catch one more', tab: 'wilds', point: '.gr-spawn', seed: true, text: 'Now catch a second Greeble. This one can work in camp.',
+    done: w => w.s.stats.caught >= 2 },
+  { title: 'Put it to work', tab: 'camp', top: true, point: '.gr-sendbag .gr-btn.g', text: 'Greebles in camp earn scrap and bring back materials, even while the game is closed. They also rest there: tired team members get energy back 4× faster in camp. Tap "Camp".',
     done: w => w.s.camp.some(Boolean) },
-  { title: 'Your camp is working', tab: 'camp', point: '.gr-subtabs [data-k=nest]', text: 'Every 15 seconds your campers earn scrap. Dig Greebles find Ore, Trawl Greebles pull in Kelp and Skirmish Greebles salvage Gears. Later, open the Nest (glowing up top) and put two of the same family in it to get eggs.', next: 'Got it' },
+  { title: 'Candy & evolving', tab: 'bag', text: 'Every Greeble you catch gives candy for its family. To evolve, a Greeble needs the right level AND enough candy. Levels stop at a cap (🔒) until you beat the next area boss.', next: 'Got it' },
   { title: 'Daily tasks', tab: 'wilds', point: '.gr-daily', text: 'Every day you get 3 small tasks here. Finish them for scrap and snares, plus a bonus when you finish all 3.', next: 'Nice' },
-  { title: "You're all set!", text: 'Catch more Greebles, evolve them in the Bag, fight robots on the Fight tab, and fix your ship to get home. Each tab shows a quick tip the first time you open it. Have fun!', next: 'Start exploring' },
+  { title: "You're all set!", text: 'Catch more Greebles, train your team, beat the boss of each area, and fix your ship to get home. Each tab shows a quick tip the first time you open it. Have fun!', next: 'Start exploring' },
 ];
 
 export function Intro({ w, tab, setTab, save }: { w: World; tab: Tab; setTab: (t: Tab) => void; save: () => void }) {
@@ -32,10 +39,10 @@ export function Intro({ w, tab, setTab, save }: { w: World; tab: Tab; setTab: (t
   const advance = () => { w.s.intro = i + 1 >= STEPS.length ? 99 : i + 1; const nx = STEPS[i + 1]; if (nx?.tab) setTab(nx.tab); save(); };
   const doneNow = !!(st.done && st.done(w));
   if (st.tab && tab !== st.tab) queueMicrotask(() => setTab(st.tab!));
-  // make sure there's something to catch on step 2
-  if (i === 1 && w.here.length === 0) queueMicrotask(() => { w.addSpawn(Date.now(), 'wild', 'ashpup'); w.drain(); save(); });
+  // make sure there's something to catch on the catch steps
+  if (st.seed && w.here.length === 0) queueMicrotask(() => { w.addSpawn(Date.now(), 'wild', i === 1 ? 'scrappling' : 'ashpup'); w.drain(); save(); });
   // and something to catch it with
-  if (i === 1 && w.count('snare') < 3) w.s.items.snare = 5;
+  if (st.seed && w.count('snare') < 3) w.s.items.snare = 5;
   const modal = !st.done;
   // bring the thing we point at into view (it may be below the fold)
   useEffect(() => {

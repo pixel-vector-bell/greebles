@@ -6,25 +6,27 @@ import {
   JOB, FAVOR_MULT, LURES, LURE_MS, LURE_SPAWN_MIN, LURE_SPAWN_MAX, type LureId,
   HUNTS, HUNT_SPAWN_MS, type Hunt, NEST_MS, EGG_MAX, HATCH_MS, EGG_PRISM_MULT, TASK_POOL, DAILY_COUNT, ELEMENTS, familyRoot, SHIP_PARTS, PERKS, perkCost, SIGNAL_STEP, EXPEDITION_MS, DAY_MS, WEEK_MS, SWARM_MULT, type PartId, type PerkId,
   RECIPES, MOVE_AUTO, MOVE_AUTO_MULT, MOVE_CHARGE, MOVE_TAP_MULT, elementOf, typeMult, type Element,
+  LEVEL_CAPS, XP_BANK_LEVELS, AUTO_RESERVE, WILD_UNDER_CAP, ENERGY_COST, CANDY, evoCandy, CAMP_SCRAP_MULT, PATROL_SCRAP_MULT,
   type Evo, type ItemId, type Morph, type Rarity, type RegionId, type Role, type SnareId, type UpgradeId,
 } from './content';
 import { nextRandom } from './rng';
 
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
 
-export interface Greeble { u: string; sp: string; lv: number; xp: number; stars: number; prism: boolean; caughtAt?: number }
+/** `en` = energy (0 to RULES.maxEnergy, can be fractional while it refills). */
+export interface Greeble { u: string; sp: string; lv: number; xp: number; stars: number; prism: boolean; en: number; caughtAt?: number }
 export type SpawnSrc = 'wild' | 'crater' | 'beacon' | 'wreck' | 'mythic' | 'legend' | 'lure';
 export interface Spawn { id: string; sp: string; lv: number; stars: number; prism: boolean; src: SpawnSrc; at: number; until: number; x: number; y: number; reg: RegionId }
 export interface Encounter { spawn: string; treat: boolean; throws: number }
 export type FightKind = 'patrol' | 'wreck' | 'boss';
 export interface Fighter { u: string; hp: number; maxHp: number; charge: number; boost: boolean }
-export interface Fight { team: Fighter[]; robot: string; robotHp: number; robotMax: number; carry: number; kind: FightKind; reg: RegionId; /** convenience: first fighter */ u: string }
+export interface Fight { team: Fighter[]; robot: string; robotHp: number; robotMax: number; carry: number; kind: FightKind; reg: RegionId; /** convenience: first fighter */ u: string; /** started by Auto-patrol */ auto?: boolean }
 export interface Wreck { robot: string; until: number }
 export interface Egg { id: string; sp: string; prism: boolean; stars: number; left: number; total: number }
 export interface DailyTask { id: string; key: string; need: number; label: string; base: number; done: boolean }
 
 export interface Stats {
-  caught: number; thrown: number; fled: number; prisms: number; sold: number; grafts: number; evolved: number;
+  caught: number; thrown: number; fled: number; prisms: number; sold: number; evolved: number;
   wins: number; losses: number; wrecks: number; scrapEarned: number; perfects: number; bosses: number;
 }
 
@@ -37,6 +39,15 @@ export interface GameState {
   bagMax: number;
   camp: (string | null)[];
   campCarry: number;
+  /** 0.13: the Greebles that fight. Campers work and rest; the team fights. */
+  team: (string | null)[];
+  /** 0.13: the team fights patrols on its own while it has energy (also while you're away). */
+  autoPatrol: boolean;
+  patrolCarry: number;
+  /** 0.13: candy per family (keyed by the family's first stage). Spent to evolve. */
+  candy: Record<string, number>;
+  /** 0.13: this save was reset for the new rules (show the notice once). */
+  newRules?: boolean;
   fight: Fight | null;
   items: Partial<Record<ItemId, number>>;
   // the wilds
@@ -95,12 +106,13 @@ export interface GameState {
   tips: Record<string, true>;
 }
 
-const freshStats = (): Stats => ({ caught: 0, thrown: 0, fled: 0, prisms: 0, sold: 0, grafts: 0, evolved: 0, wins: 0, losses: 0, wrecks: 0, scrapEarned: 0, perfects: 0, bosses: 0 });
+const freshStats = (): Stats => ({ caught: 0, thrown: 0, fled: 0, prisms: 0, sold: 0, evolved: 0, wins: 0, losses: 0, wrecks: 0, scrapEarned: 0, perfects: 0, bosses: 0 });
 
 export function newGame(seed = (Math.random() * 2 ** 31) | 0, now = Date.now()): GameState {
   const s: GameState = {
     version: SAVE_VERSION, rng: seed, nextId: 1, scrap: RULES.startScrap,
     bag: [], bagMax: RULES.bagMax, camp: Array(RULES.campSlots).fill(null), campCarry: 0, fight: null,
+    team: Array(RULES.teamSlots).fill(null), autoPatrol: true, patrolCarry: 0, candy: {},
     items: { ...START_ITEMS },
     spawns: [], wildClock: now, nextAmbientAt: now + RULES.ambientMinMs, nextCraterAt: 0, nextBeaconAt: 0, beaconUntil: 0,
     wreck: null, nextWreckAt: now + RULES.wreckFirstMs, enc: null,
@@ -124,12 +136,13 @@ export type GameEvent =
   | { t: 'broke'; sp: string; quality: number }
   | { t: 'fled'; sp: string }
   | { t: 'sold'; sp: string; scrap: number }
-  | { t: 'grafted'; sp: string; lv: number; stars: number; starUp: boolean }
   | { t: 'evolved'; u: string; from: string; to: string }
   | { t: 'level'; u: string; lv: number }
   | { t: 'canEvolve'; u: string; sp: string }
-  | { t: 'fightWon'; sp: string; robot: string; scrap: number; loot: Partial<Record<ItemId, number>>; wreck: boolean }
-  | { t: 'fightLost'; sp: string; robot: string; wreck: boolean }
+  | { t: 'fightWon'; sp: string; robot: string; scrap: number; loot: Partial<Record<ItemId, number>>; wreck: boolean; auto?: boolean }
+  | { t: 'fightLost'; sp: string; robot: string; wreck: boolean; auto?: boolean }
+  | { t: 'candy'; root: string; n: number }
+  | { t: 'capUp'; cap: number }
   | { t: 'bossWon'; reg: RegionId; first: boolean; scrap: number; unlocked?: RegionId; loot: Partial<Record<ItemId, number>> }
   | { t: 'bossLost'; reg: RegionId }
   | { t: 'move'; u: string; dmg: number; tapped: boolean; mult: number }
@@ -184,7 +197,7 @@ export class World {
     const g = this.get(u); if (!g) return fail('Not in the bag.');
     const why = this.canNest(g); if (why) return fail(why);
     if (this.inNest(u)) return OK;
-    if (this.inCamp(u) || this.fighting(u) || this.s.expo?.u === u) return fail('It is busy. Bench it first.');
+    if (this.inCamp(u) || this.inTeam(u) || this.fighting(u) || this.s.expo?.u === u) return fail('It is busy. Take it off the team or out of camp first.');
     const i = slot ?? (this.s.nest[0] ? 1 : 0);
     if (this.s.nest[i]) return fail('That nest spot is taken.');
     this.s.nest[i] = u;
@@ -214,8 +227,9 @@ export class World {
     if (e.left > 0) return fail('It is not ready yet.');
     if (this.s.bag.length >= this.s.bagMax) return fail('Your bag is full.');
     this.s.eggs.splice(i, 1);
-    this.s.bag.push({ u: this.uid('g'), sp: e.sp, lv: 1, xp: 0, stars: e.stars, prism: e.prism, caughtAt: Date.now() });
+    this.s.bag.push({ u: this.uid('g'), sp: e.sp, lv: 1, xp: 0, stars: e.stars, prism: e.prism, en: RULES.maxEnergy, caughtAt: Date.now() });
     this.s.caught[e.sp] = true; this.s.seen[e.sp] = true;
+    this.addCandy(e.sp, CANDY.hatch * (e.prism ? CANDY.prismMult : 1));
     if (e.prism) { this.s.prismCaught[e.sp] = true; this.s.stats.prisms++; this.tick('prism'); }
     this.tick('hatch');
     this.emit({ t: 'hatched', sp: e.sp, prism: e.prism, stars: e.stars });
@@ -296,7 +310,20 @@ export class World {
   get(u: string) { return this.s.bag.find(g => g.u === u); }
   spawn(id: string) { return this.s.spawns.find(x => x.id === id); }
   inCamp(u: string) { return this.s.camp.includes(u); }
-  busy(u: string) { return this.inCamp(u) || this.fighting(u) || this.s.expo?.u === u || this.inNest(u); }
+  busy(u: string) { return this.inCamp(u) || this.inTeam(u) || this.fighting(u) || this.s.expo?.u === u || this.inNest(u); }
+  inTeam(u: string) { return this.s.team.includes(u); }
+  /** Team members, in slot order. */
+  get teamList(): Greeble[] { return this.s.team.map(u => (u ? this.get(u) : undefined)).filter(Boolean) as Greeble[]; }
+  /** Team members with at least `cost` energy (and not out on an expedition). */
+  readyTeam(cost = 1): Greeble[] { return this.teamList.filter(g => this.energy(g) >= cost && this.s.expo?.u !== g.u); }
+  energy(g: Greeble) { return Math.floor(g.en + 1e-9); }
+  /** ms for one energy to come back for this Greeble right now. */
+  enMs(g: Greeble) { return (this.inCamp(g.u) ? RULES.enCampMs : RULES.enRestMs) / (1 + this.up('bedroll') * 0.25); }
+  /** How many area bosses you've beaten, in order (sets the level cap). */
+  get bossesInOrder() { let i = 0; while (i < REGIONS.length && this.s.bossBeaten[REGIONS[i].id]) i++; return i; }
+  get levelCap() { return LEVEL_CAPS[Math.min(LEVEL_CAPS.length - 1, this.bossesInOrder)]; }
+  candyOf(sp: string) { return this.s.candy[familyRoot(sp)] ?? 0; }
+  private addCandy(sp: string, n: number) { const r = familyRoot(sp); this.s.candy[r] = (this.s.candy[r] ?? 0) + n; this.emit({ t: 'candy', root: r, n }); }
   inNest(u: string) { return this.s.nest.includes(u); }
   perk(id: PerkId) { return this.s.perks[id] ?? 0; }
   /** Robots get tougher each time you signal home (and pay more). */
@@ -310,38 +337,29 @@ export class World {
   fighting(u: string) { return !!this.s.fight?.team.some(f => f.u === u); }
   get reg() { return region(this.s.region); }
   up(id: UpgradeId) { return this.s.upgrades[id] ?? 0; }
+  get teamMax() { return Math.min(TEAM_MAX, RULES.teamSlots + this.up('squad')); }
   get offlineCap() { return RULES.offlineCapMs + (this.up('away') + this.perk('watch')) * 4 * 60 * 60 * 1000; }
   isOpen(id: RegionId) { return regionIndex(id) < this.s.unlocked; }
+  /** The newest area you've opened. */
+  unlockedTop(): RegionId { return REGIONS[Math.min(REGIONS.length, this.s.unlocked) - 1].id; }
   bossReadyAt(id: RegionId) { const b = this.s.bossBeaten[id]; return b ? b + BOSS_REMATCH_MS : 0; }
   count(item: ItemId) { return this.s.items[item] ?? 0; }
   private give(item: ItemId, n: number) { this.s.items[item] = this.count(item) + n; }
   quality(g: { stars: number; prism: boolean }) { return (1 + (g.stars - 1) * 0.1) * (g.prism ? 1.2 : 1); }
   power(g: Greeble) { const m = morph(g.sp); return Math.round((BASE_POWER[m.rarity] + (m.stage - 1) * 2 + g.lv + (m.role === 'fight' ? 2 : 0)) * this.quality(g)); }
   fighterHp(g: Greeble) { return 10 + this.power(g) * 2; }
-  yieldOf(g: Greeble) { const m = morph(g.sp); return Math.round((1 + Math.floor(g.lv / 4) + (m.stage - 1) + (m.role === 'fight' ? 1 : 0)) * this.quality(g) * (1 + this.up('bench') * 0.1) * (m.role === this.reg.favor ? 1.25 : 1) * (1 + this.perk('thrift') * 0.2) * 10) / 10; }
+  yieldOf(g: Greeble) { const m = morph(g.sp); return Math.round((1 + Math.floor(g.lv / 10) + (m.stage - 1) + (m.role === 'fight' ? 1 : 0)) * this.quality(g) * (1 + this.up('bench') * 0.1) * (m.role === this.reg.favor ? 1.25 : 1) * (1 + this.perk('thrift') * 0.2) * CAMP_SCRAP_MULT * 10) / 10; }
   /** Bosses: everyone can help, but only Skirmish Greebles hit at full power. */
   teamPower(g: Greeble) { return Math.max(1, Math.round(this.power(g) * (morph(g.sp).role === 'fight' ? 1 : 0.6))); }
-  sellValue(g: Greeble) { return Math.round(SELL[morph(g.sp).rarity] * g.lv * (g.prism ? 5 : 1)); }
+  sellValue(g: Greeble) { return Math.round(SELL[morph(g.sp).rarity] * g.lv * (g.prism ? 5 : 1) * 0.5); }
   get campYield() { return Math.round(this.s.camp.reduce((n, u) => { const g = u ? this.get(u) : undefined; return n + (g ? this.yieldOf(g) : 0); }, 0) * 10) / 10; }
   get caughtCount() { return Object.keys(this.s.caught).length; }
-  /** Same-kind Greebles that could be fed into `u` (weakest first). */
-  graftPartners(u: string) {
-    const g = this.get(u); if (!g) return [];
-    return this.s.bag.filter(x => x.u !== u && x.sp === g.sp && !this.busy(x.u)).sort((a, b) => Number(a.prism) - Number(b.prism) || a.stars - b.stars || a.lv - b.lv);
-  }
-  graftPartner(u: string) { return this.graftPartners(u)[0]; }
-  /** What grafting `feed` into `keep` would do, without doing it. */
-  graftPreview(keep: Greeble, feed: Greeble) {
-    let lv = keep.lv, xp = keep.xp + 40 + feed.lv * 15;
-    while (lv < RULES.maxLevel && xp >= xpNeed(lv)) { xp -= xpNeed(lv); lv++; }
-    const sure = feed.stars > keep.stars ? feed.stars : null;
-    const chance = sure || keep.stars >= 5 ? 0 : feed.stars === keep.stars ? 0.35 : 0.12;
-    return { xp: 40 + feed.lv * 15, lvFrom: keep.lv, lvTo: lv, starsFrom: keep.stars, starsSure: sure, starChance: chance, prism: feed.prism && !keep.prism, wastesPrism: feed.prism && keep.prism };
-  }
   /** Evolution options for this Greeble right now, with why each one is or isn't ready. */
   evoOptions(g: Greeble, now: number): { evo: Evo; ready: boolean; why: string }[] {
     return (morph(g.sp).evo ?? []).map(evo => {
-      const why = g.lv < evo.lv ? `Reach level ${evo.lv}`
+      const need = evoCandy(morph(g.sp));
+      const why = g.lv < evo.lv ? (evo.lv > this.levelCap ? `Reach level ${evo.lv} (beat the next boss to raise the cap)` : `Reach level ${evo.lv}`)
+        : this.candyOf(g.sp) < need ? `Needs ${need} candy (have ${this.candyOf(g.sp)})`
         : evo.item && this.count(evo.item) < 1 ? `Needs a ${ITEMS[evo.item].name}`
         : evo.night && !isNight(now) ? 'Only at night'
         : '';
@@ -349,12 +367,16 @@ export class World {
     });
   }
 
+  /** Xp you can bank at the level cap (it pays out when the cap goes up). */
+  bankMax(g: Greeble) { return g.lv >= RULES.maxLevel ? 0 : xpNeed(g.lv) * XP_BANK_LEVELS; }
   private addXp(g: Greeble, xp: number) {
     const before = this.evoOptions(g, Date.now()).some(o => o.ready);
+    const cap = this.levelCap;
     g.xp += xp;
-    while (g.lv < RULES.maxLevel && g.xp >= xpNeed(g.lv)) { g.xp -= xpNeed(g.lv); g.lv++; this.emit({ t: 'level', u: g.u, lv: g.lv }); }
+    while (g.lv < cap && g.xp >= xpNeed(g.lv)) { g.xp -= xpNeed(g.lv); g.lv++; this.emit({ t: 'level', u: g.u, lv: g.lv }); }
     if (g.lv >= RULES.maxLevel) g.xp = 0;
-    if (!before && (morph(g.sp).evo ?? []).some(e => g.lv >= e.lv && (!e.item || this.count(e.item) > 0) && !e.night)) this.emit({ t: 'canEvolve', u: g.u, sp: g.sp });
+    else if (g.lv >= cap) g.xp = Math.min(g.xp, this.bankMax(g));
+    if (!before && this.evoOptions(g, Date.now()).some(o => o.ready || o.why === 'Only at night')) this.emit({ t: 'canEvolve', u: g.u, sp: g.sp });
   }
   private earn(n: number) { this.s.scrap += n; this.s.stats.scrapEarned += n; }
 
@@ -392,7 +414,7 @@ export class World {
     const m = sp ? morph(sp) : this.rollKind(t, opts);
     const lifeMs = life ?? (src === 'wild' ? RULES.ambientLifeMs : src === 'beacon' || src === 'lure' ? RULES.beaconLifeMs : src === 'wreck' ? RULES.wreckSpawnLifeMs : RULES.ambientLifeMs);
     const x: Spawn = {
-      id: this.uid('w'), sp: m.id, lv: Math.min(RULES.maxLevel, 1 + Math.floor(this.rand() * WILD_MAX_LV[m.rarity]) + this.reg.lvl), stars: this.rollStars(),
+      id: this.uid('w'), sp: m.id, lv: Math.max(1, Math.min(this.levelCap - WILD_UNDER_CAP, 1 + Math.floor(this.rand() * WILD_MAX_LV[m.rarity]) + this.reg.lvl)), stars: this.rollStars(),
       prism: this.rand() < RULES.prismOdds * (opts.prismBoost ?? 1) * (1 + this.perk('shine') * 0.25), src, at: t, until: t + lifeMs, x: 0, y: 0, reg: this.s.region,
     };
     // spread them out so tiles don't sit on top of each other (best of a few tries)
@@ -539,7 +561,7 @@ export class World {
     const s: GameState = {
       ...fresh,
       nextId: old.nextId,
-      bag: kept.map(g => ({ ...g, lv: Math.max(1, Math.floor(g.lv / 2)), xp: 0 })),
+      bag: kept.map(g => ({ ...g, lv: Math.min(LEVEL_CAPS[0], Math.max(1, Math.floor(g.lv / 2))), xp: 0, en: RULES.maxEnergy })),
       seen: old.seen, caught: old.caught, prismCaught: old.prismCaught, claimed: old.claimed,
       stats: { ...old.stats }, tips: old.tips,
       signals: old.signals + 1, sp: old.sp + this.signalReward, perks: old.perks,
@@ -571,7 +593,7 @@ export class World {
     const g = this.get(u); if (!g) return fail('Pick a Greeble.');
     if (this.s.expo) return fail('Someone is already out exploring.');
     if (!this.expoReady(now)) return fail('One expedition a day. Come back tomorrow!');
-    if (this.busy(u)) return fail('It is busy.');
+    if (this.busy(u)) return fail('It is busy. Take it off the team or out of camp first.');
     this.s.expo = { u, until: now + EXPEDITION_MS, reg: this.s.region };
     this.s.expoDay = Math.floor(now / DAY_MS);
     this.tick('expo'); this.checkHunts(now);
@@ -589,6 +611,7 @@ export class World {
     if (ri >= 3) add('crystal', 2 + Math.floor(this.rand() * 3));
     if (this.rand() < 0.3) add('lureRare', 1);
     this.addXp(g, 200 + ri * 150);
+    this.addCandy(g.sp, CANDY.expo);
     // a rare friend follows it home and waits in the wilds of that area
     const reg0 = this.s.region; this.s.region = e.reg;
     const friend = this.addSpawn(t, 'wild', undefined, 2 * 60 * 60_000, { rareBoost: 4, prismBoost: 2 });
@@ -600,7 +623,7 @@ export class World {
   startEncounter(id: string): ActionResult {
     const x = this.spawn(id); if (!x) return fail('It wandered off.');
     if (this.s.enc && this.s.enc.spawn !== id) return fail('You are already trying to catch one.');
-    if (this.s.bag.length >= this.s.bagMax) return fail('Your bag is full. Sell or graft some Greebles first.');
+    if (this.s.bag.length >= this.s.bagMax) return fail('Your bag is full. Send some Greebles home first (Bag tab).');
     this.s.enc = this.s.enc ?? { spawn: id, treat: false, throws: 0 };
     this.s.seen[x.sp] = true;
     return OK;
@@ -638,8 +661,9 @@ export class World {
     const m = morph(x.sp);
     if (this.rand() < chance) {
       const first = !s.caught[x.sp];
-      s.bag.push({ u: this.uid('g'), sp: x.sp, lv: x.lv, xp: 0, stars: x.stars, prism: x.prism, caughtAt: Date.now() });
+      s.bag.push({ u: this.uid('g'), sp: x.sp, lv: x.lv, xp: 0, stars: x.stars, prism: x.prism, en: RULES.maxEnergy, caughtAt: Date.now() });
       s.caught[x.sp] = true; s.seen[x.sp] = true;
+      this.addCandy(x.sp, (CANDY.catch + (x.stars >= 4 ? CANDY.goodStars : 0)) * (x.prism ? CANDY.prismMult : 1));
       if (x.prism) { s.prismCaught[x.sp] = true; s.stats.prisms++; this.tick('prism'); }
       s.stats.caught++;
       this.tick('catch'); this.tick(`catch:${elementOf(x.sp)}`); if (isNight(Date.now())) this.tick('night');
@@ -689,29 +713,16 @@ export class World {
   sell(u: string): ActionResult {
     const g = this.get(u); if (!g) return fail('Not in the bag.');
     if (this.fighting(u)) return fail('It is fighting right now.');
+    if (this.s.expo?.u === u) return fail('It is out on an expedition.');
     const scrap = this.sellValue(g);
     this.s.camp = this.s.camp.map(x => (x === u ? null : x));
+    this.s.team = this.s.team.map(x => (x === u ? null : x));
+    this.addCandy(g.sp, CANDY.home);
     this.s.nest = this.s.nest.map(x => (x === u ? null : x)) as [string | null, string | null];
     this.s.bag = this.s.bag.filter(x => x.u !== u);
     this.earn(scrap);
     this.s.stats.sold++;
     this.emit({ t: 'sold', sp: g.sp, scrap });
-    return OK;
-  }
-
-  /** Feed a duplicate in: big xp, and a chance to raise quality stars. */
-  graft(u: string, feedU?: string): ActionResult {
-    const g = this.get(u); if (!g) return fail('Not in the bag.');
-    const other = feedU ? this.graftPartners(u).find(x => x.u === feedU) : this.graftPartner(u);
-    if (!other) return fail(feedU ? `That one can't be grafted in (it must be another free ${morph(g.sp).name}).` : `Needs another ${morph(g.sp).name} that isn't camping or fighting.`);
-    this.s.bag = this.s.bag.filter(x => x.u !== other.u);
-    const before = g.stars;
-    if (other.stars > g.stars) g.stars = other.stars;
-    else if (g.stars < 5 && this.rand() < (other.stars === g.stars ? 0.35 : 0.12)) g.stars++;
-    if (other.prism && !g.prism) g.prism = true; // feeding a Prismatic in passes the shine on
-    this.s.stats.grafts++; this.tick('graft');
-    this.addXp(g, 40 + other.lv * 15);
-    this.emit({ t: 'grafted', sp: g.sp, lv: g.lv, stars: g.stars, starUp: g.stars > before });
     return OK;
   }
 
@@ -721,6 +732,8 @@ export class World {
     if (!opt) return fail('It cannot become that.');
     if (!opt.ready) return fail(opt.why);
     if (opt.evo.item) this.s.items[opt.evo.item] = this.count(opt.evo.item) - 1;
+    const root = familyRoot(g.sp);
+    this.s.candy[root] = this.candyOf(g.sp) - evoCandy(morph(g.sp));
     const from = g.sp;
     g.sp = to;
     this.s.seen[to] = true; this.s.caught[to] = true;
@@ -736,12 +749,47 @@ export class World {
     if (!this.get(u)) return fail('Not in the bag.');
     if (this.fighting(u)) return fail('It is fighting right now.');
     if (this.inNest(u)) return fail('It is in the nest. Take it out first.');
+    if (this.s.expo?.u === u) return fail('It is out on an expedition.');
     const i = slot ?? this.s.camp.findIndex(x => !x);
     if (i < 0 || i >= this.s.camp.length) return fail('Camp is full.');
     this.s.camp = this.s.camp.map(x => (x === u ? null : x));
+    this.s.team = this.s.team.map(x => (x === u ? null : x));   // moving to camp takes it off the team
     this.s.camp[i] = u;
     return OK;
   }
+  /** Put a Greeble on the team (one tap: it leaves camp if it was working). */
+  toTeam(u: string, slot?: number): ActionResult {
+    if (!this.get(u)) return fail('Not in the bag.');
+    if (this.inTeam(u)) return OK;
+    if (this.fighting(u)) return fail('It is fighting right now.');
+    if (this.inNest(u)) return fail('It is in the nest. Take it out first.');
+    if (this.s.expo?.u === u) return fail('It is out on an expedition.');
+    while (this.s.team.length < this.teamMax) this.s.team.push(null);
+    const i = slot ?? this.s.team.findIndex(x => !x);
+    if (i < 0 || i >= this.s.team.length) return fail(`The team is full (${this.s.team.length}). Take one off first.`);
+    if (this.s.team[i]) return fail('That team spot is taken.');
+    this.s.camp = this.s.camp.map(x => (x === u ? null : x));
+    this.s.team[i] = u;
+    return OK;
+  }
+  offTeam(u: string): ActionResult {
+    if (this.fighting(u)) return fail('It is fighting right now.');
+    this.s.team = this.s.team.map(x => (x === u ? null : x));
+    return OK;
+  }
+  /** Swap two Greebles: `out` leaves the team (to camp, in `inn`'s old spot if it was camping), `inn` joins. */
+  swapIn(inn: string, out: string): ActionResult {
+    if (!this.inTeam(out)) return fail('That one is not on the team.');
+    if (this.fighting(out) || this.fighting(inn)) return fail('Wait for the fight to end.');
+    const campSlot = this.s.camp.indexOf(inn);
+    const ti = this.s.team.indexOf(out);
+    this.s.team[ti] = null;
+    const r = this.toTeam(inn, ti);
+    if (!r.ok) { this.s.team[ti] = out; return r; }
+    if (campSlot >= 0 && !this.s.camp[campSlot]) this.s.camp[campSlot] = out;   // the tired one rests in camp
+    return OK;
+  }
+  setAutoPatrol(on: boolean): ActionResult { this.s.autoPatrol = on; this.s.patrolCarry = 0; return OK; }
   bench(slot: number): ActionResult {
     if (slot < 0 || slot >= this.s.camp.length) return fail('No such camp spot.');
     this.s.camp[slot] = null;
@@ -750,10 +798,10 @@ export class World {
 
   // ── robots ────────────────────────────────────────────────
   /** Robot stats for a fight in the current area. */
-  foe(robotId: string, kind: FightKind): { name: string; hp: number; atk: number; xp: number; scrap: number; el: Element; tier: number } | null {
+  foe(robotId: string, kind: FightKind): { name: string; hp: number; atk: number; xp: number; scrap: number; el: Element; tier: number; all?: boolean } | null {
     const reg = this.reg;
     const h = this.hard;
-    if (kind === 'boss') return { name: reg.boss.name, hp: Math.round(reg.boss.hp * h), atk: Math.round(reg.boss.atk * Math.sqrt(h)), xp: reg.boss.xp, scrap: Math.round(reg.boss.scrap * h), el: reg.boss.el, tier: 3 };
+    if (kind === 'boss') return { name: reg.boss.name, hp: Math.round(reg.boss.hp * h), atk: Math.round(reg.boss.atk * Math.sqrt(h)), xp: reg.boss.xp, scrap: Math.round(reg.boss.scrap * h), el: reg.boss.el, tier: 3, all: true };
     const r = robot(robotId); if (!r) return null;
     const st = robotIn(r, reg);
     const wreck = kind === 'wreck' ? RULES.wreckHpMult : 1;
@@ -763,12 +811,14 @@ export class World {
   hitOn(g: Greeble, el: Element) { return Math.max(1, Math.round(this.teamPower(g) * typeMult(elementOf(g.sp), el))); }
   /** One hit from the robot on this Greeble. */
   hitBy(g: Greeble, atk: number, el: Element) { return Math.max(1, Math.round(atk * typeMult(el, elementOf(g.sp))) - Math.floor(g.lv / 5)); }
-  private teamOf(us: string[]): Greeble[] | string {
+  /** Only team members fight, and each needs enough energy for this kind of fight. */
+  private teamOf(us: string[], kind: FightKind = 'patrol', checkEnergy = true): Greeble[] | string {
     const ids = [...new Set(us)].slice(0, TEAM_MAX);
     const team = ids.map(u => this.get(u)).filter(Boolean) as Greeble[];
-    if (!team.length) return 'Pick a Greeble.';
-    if (team.some(g => this.inCamp(g.u))) return 'Bench them from camp first.';
-    if (team.some(g => this.inNest(g.u))) return 'Take them out of the nest first.';
+    if (!team.length) return 'Put Greebles on your team first (Fight → Team).';
+    if (team.some(g => !this.inTeam(g.u))) return 'Only Greebles on your team can fight.';
+    if (team.some(g => this.s.expo?.u === g.u)) return 'One of them is out on an expedition.';
+    if (checkEnergy && team.some(g => this.energy(g) < ENERGY_COST[kind])) return `Each fighter needs ⚡${ENERGY_COST[kind]} energy. Let tired ones rest in camp.`;
     return team;
   }
   /** Simulate a fight on copies (moves fire on their own): would this team win? */
@@ -778,14 +828,14 @@ export class World {
   /** Rough chance to win (0-1), from a few simulated fights. */
   winOdds(us: string | string[], robotId: string, kind: FightKind | boolean = 'patrol'): number {
     const k: FightKind = typeof kind === 'boolean' ? (kind ? 'wreck' : 'patrol') : kind;
-    const team = this.teamOf(Array.isArray(us) ? us : [us]); const foe = this.foe(robotId, k);
+    const team = this.teamOf(Array.isArray(us) ? us : [us], k, false); const foe = this.foe(robotId, k);
     if (typeof team === 'string' || !foe) return 0;
-    if (team.length === 1) return this.simFight(team, foe, 0) ? 1 : 0;   // one target: no luck involved
+    if (team.length === 1 || foe.all) return this.simFight(team, foe, 0) ? 1 : 0;   // one target (or a boss hitting everyone): no luck involved
     let wins = 0; const N = 9;
     for (let i = 0; i < N; i++) if (this.simFight(team, foe, i)) wins++;
     return wins / N;
   }
-  private simFight(team: Greeble[], foe: { hp: number; atk: number; el: Element }, seed: number): boolean {
+  private simFight(team: Greeble[], foe: { hp: number; atk: number; el: Element; all?: boolean }, seed: number): boolean {
     const hp = team.map(g => this.fighterHp(g)), ch = team.map(() => 0);
     const rs = { rng: seed * 7919 + 13 };
     let rhp = foe.hp;
@@ -798,16 +848,16 @@ export class World {
       }
       if (rhp <= 0) return true;
       const alive = hp.map((h, i) => (h > 0 ? i : -1)).filter(i => i >= 0);
-      const t = alive[Math.floor(nextRandom(rs) * alive.length)];
-      hp[t] -= this.hitBy(team[t], foe.atk, foe.el);
+      if (foe.all) for (const t of alive) hp[t] -= this.hitBy(team[t], foe.atk, foe.el);   // bosses hit the whole team
+      else { const t = alive[Math.floor(nextRandom(rs) * alive.length)]; hp[t] -= this.hitBy(team[t], foe.atk, foe.el); }
       if (hp.every(h => h <= 0)) return false;
     }
     return false;
   }
-  startFight(us: string | string[], robotId: string, kind: FightKind | boolean = 'patrol'): ActionResult {
+  startFight(us: string | string[], robotId: string, kind: FightKind | boolean = 'patrol', auto = false): ActionResult {
     const k: FightKind = typeof kind === 'boolean' ? (kind ? 'wreck' : 'patrol') : kind;
     if (this.s.fight) return fail('A fight is already on.');
-    const team = this.teamOf(Array.isArray(us) ? us : [us]);
+    const team = this.teamOf(Array.isArray(us) ? us : [us], k);
     if (typeof team === 'string') return fail(team);
     if (k === 'wreck' && (!this.s.wreck || this.s.wreck.robot !== robotId)) return fail('The wreck is gone.');
     if (k === 'boss' && Date.now() < this.bossReadyAt(this.s.region)) return fail('The boss is still being rebuilt. Come back later.');
@@ -816,7 +866,10 @@ export class World {
     this.s.fight = {
       team: team.map(g => { const hp = this.fighterHp(g); return { u: g.u, hp, maxHp: hp, charge: 0, boost: false }; }), u: team[0].u,
       robot: k === 'boss' ? 'boss' : robotId, robotHp: foe.hp, robotMax: foe.hp, carry: 0, kind: k, reg: this.s.region,
+      ...(auto ? { auto: true } : {}),
     };
+    for (const g of team) g.en = Math.max(0, g.en - ENERGY_COST[k]);
+    this.s.patrolCarry = 0;
     return OK;
   }
   /** Tap a charged Greeble's special move: its next hit does 3× damage. */
@@ -849,8 +902,9 @@ export class World {
     if (f.robotHp <= 0) {
       this.s.fight = null;
       this.s.stats.wins++;
-      const share = Math.round((foe.xp + 8) * (f.kind === 'wreck' ? 1.5 : 1) / (f.kind === 'boss' ? 1 : alive.length));
-      for (const x of f.team) { const g = this.get(x.u); if (g) this.addXp(g, share); }
+      // 0.13: everyone who fought gets the full xp (energy is what limits fighting now)
+      const share = Math.round(foe.xp * (f.kind === 'wreck' ? 1.5 : f.kind === 'boss' && this.s.bossBeaten[f.reg] ? 0.5 : 1));
+      for (const x of f.team) { const g = this.get(x.u); if (g) { if (x.hp <= 0) g.en = 0; this.addXp(g, share); } }
       const loot: Partial<Record<ItemId, number>> = {};
       const add = (k: ItemId, n: number) => { loot[k] = (loot[k] ?? 0) + n; };
       const ri = regionIndex(f.reg);
@@ -859,7 +913,7 @@ export class World {
       if (f.kind === 'boss' ? true : this.rand() < [0.02, 0.06, 0.15][foe.tier] + (f.kind === 'wreck' ? 0.1 : 0)) add('core', f.kind === 'boss' ? 1 + ri : 1);
       if (f.kind === 'boss') {
         const reg = region(f.reg); const first = !this.s.bossBeaten[f.reg];
-        const scrap = Math.round(foe.scrap * (first ? 1 : 0.5));
+        const scrap = Math.round(foe.scrap * (first ? 1 : 0.15));   // rematches pay a little
         this.earn(scrap);
         this.s.bossBeaten[f.reg] = now;
         this.s.stats.bosses++; this.tick(`boss:${f.reg}`); this.checkHunts(now);
@@ -868,13 +922,14 @@ export class World {
         for (const [k, v] of Object.entries(loot) as [ItemId, number][]) this.give(k, v);
         let unlocked: RegionId | undefined;
         if (first && ri + 1 < REGIONS.length && this.s.unlocked <= ri + 1) { this.s.unlocked = ri + 2; unlocked = REGIONS[ri + 1].id; }
+        if (first) this.raiseCap();
         const reg0 = this.s.region; this.s.region = f.reg;
         this.addSpawn(now, 'legend', reg.legendary, 30 * 60_000);
         this.s.region = reg0;
         this.emit({ t: 'bossWon', reg: f.reg, first, scrap, unlocked, loot });
         return;
       }
-      const scrap = Math.round((foe.scrap + lead.lv) * (f.kind === 'wreck' ? 2 : 1));
+      const scrap = Math.round((foe.scrap + lead.lv) * (f.kind === 'wreck' ? 2 : 1) * PATROL_SCRAP_MULT);
       this.earn(scrap);
       add('snare', 2 + Math.floor(this.rand() * 3));
       if (this.rand() < 0.25 + foe.tier * 0.15) add('good', 1);
@@ -887,16 +942,20 @@ export class World {
         this.s.wreck = null;
         for (let i = 0; i < RULES.wreckBurst; i++) this.addSpawn(now, 'wreck', undefined, RULES.wreckSpawnLifeMs, { rareBoost: 3 });
       }
-      this.emit({ t: 'fightWon', sp: lead.sp, robot: f.robot, scrap, loot, wreck: f.kind === 'wreck' });
+      this.emit({ t: 'fightWon', sp: lead.sp, robot: f.robot, scrap, loot, wreck: f.kind === 'wreck', ...(f.auto ? { auto: true } : {}) });
       return;
     }
-    const tgt = alive[Math.floor(this.rand() * alive.length)];
-    tgt.hp -= this.hitBy(this.get(tgt.u)!, foe.atk, foe.el);
+    // a boss hits the whole team every round; other robots hit one Greeble
+    const targets = foe.all ? alive : [alive[Math.floor(this.rand() * alive.length)]];
+    for (const tgt of targets) {
+      tgt.hp -= this.hitBy(this.get(tgt.u)!, foe.atk, foe.el);
+      if (tgt.hp <= 0) { const g = this.get(tgt.u); if (g) g.en = 0; }   // knocked out: no energy left
+    }
     if (f.team.every(x => x.hp <= 0)) {
       this.s.stats.losses++;
       this.s.fight = null;
       if (f.kind === 'boss') this.emit({ t: 'bossLost', reg: f.reg });
-      else this.emit({ t: 'fightLost', sp: lead.sp, robot: f.robot, wreck: f.kind === 'wreck' });
+      else this.emit({ t: 'fightLost', sp: lead.sp, robot: f.robot, wreck: f.kind === 'wreck', ...(f.auto ? { auto: true } : {}) });
     }
   }
 
@@ -919,11 +978,13 @@ export class World {
     const price = this.upgradePrice(id);
     if (price === null) return fail('Already maxed out.');
     if (id === 'tent' && this.s.camp.length >= RULES.maxCampSlots) return fail('Camp already has 8 spots.');
+    if (id === 'squad' && this.s.team.length >= TEAM_MAX) return fail(`The team already has ${TEAM_MAX} spots.`);
     if (this.s.scrap < price) return fail(`Needs ${price.toLocaleString('en-US')} scrap.`);
     this.s.scrap -= price;
     this.s.upgrades[id] = this.up(id) + 1;
     if (id === 'tent') this.s.camp.push(null);
     if (id === 'bag') this.s.bagMax += 10;
+    if (id === 'squad') while (this.s.team.length < this.teamMax) this.s.team.push(null);
     return OK;
   }
 
@@ -941,7 +1002,6 @@ export class World {
     for (const u of this.s.camp) {
       const g = u ? this.get(u) : undefined; if (!g) continue;
       this.earn(this.yieldOf(g));
-      this.addXp(g, RULES.campXp);
       const job = this.jobOf(g);
       if (this.rand() < job.chance) {
         const n = job.item === 'crystal' ? 1 : 1 + Math.floor(ri / 2) + Math.floor(g.lv / 20);
@@ -951,11 +1011,31 @@ export class World {
     }
   }
 
+  /** The level cap just went up: banked xp pays out. */
+  private raiseCap() {
+    for (const g of this.s.bag) this.addXp(g, 0);
+    this.emit({ t: 'capUp', cap: this.levelCap });
+  }
+  /** Pick what Auto-patrol fights next: the toughest patrol robot the ready team should beat. */
+  autoPick(): { team: string[]; robot: string } | null {
+    // it keeps enough energy back that the team is always ready for a boss
+    const team = this.readyTeam(ENERGY_COST.patrol + AUTO_RESERVE).map(g => g.u);
+    if (!team.length) return null;
+    for (let i = ROBOTS.length - 1; i >= 0; i--) if (this.winOdds(team, ROBOTS[i].id, 'patrol') >= 0.7) return { team, robot: ROBOTS[i].id };
+    return null;
+  }
   /** Move camp + fights forward by `ms` (real or sped up). The wilds use real time: see updateWilds. */
   advance(ms: number, now = Date.now()) {
     if (!(ms > 0)) return;
+    // in slices, so energy, fights and Auto-patrol take turns the same way online and offline
+    let left = ms;
+    while (left > 0) { const d = Math.min(left, RULES.campTickMs); this.step(d, now); left -= d; }
+  }
+  private step(ms: number, now: number) {
     this.s.campCarry += ms;
     while (this.s.campCarry >= RULES.campTickMs) { this.s.campCarry -= RULES.campTickMs; this.campPayout(); }
+    // energy comes back (fastest while resting in camp)
+    for (const g of this.s.bag) if (g.en < RULES.maxEnergy) g.en = Math.min(RULES.maxEnergy, g.en + ms / this.enMs(g));
     this.warmEggs(ms);
     if (!this.nestWhy()) {
       // eggs laid part-way through this step have been warming since they were laid (matters for long offline catch-ups)
@@ -975,15 +1055,26 @@ export class World {
       const made = Math.floor(this.s.pressCarry / PRESS_MS_PER_SNARE);
       if (made) { this.s.pressCarry -= made * PRESS_MS_PER_SNARE; this.give('snare', made); }
     }
-    let f = this.s.fight;
-    if (f) {
-      f.carry += ms;
-      while (f && f.carry >= RULES.fightTickMs) { f.carry -= RULES.fightTickMs; this.fightRound(now); f = this.s.fight; }
+    // fights and Auto-patrol share this slice's time exactly (time left after a fight ends counts toward the next one)
+    let budget = ms;
+    for (let guard = 0; budget > 0 && guard < 50; guard++) {
+      const f = this.s.fight;
+      if (f) {
+        f.carry += budget; budget = 0;
+        while (this.s.fight === f && f.carry >= RULES.fightTickMs) { f.carry -= RULES.fightTickMs; this.fightRound(now); }
+        if (this.s.fight !== f) { budget = f.carry; this.s.patrolCarry = 0; }
+      } else if (this.s.autoPatrol && !this.s.enc) {
+        const need = RULES.patrolGapMs - this.s.patrolCarry;
+        if (budget < need) { this.s.patrolCarry += budget; budget = 0; break; }
+        budget -= need; this.s.patrolCarry = 0;
+        const pick = this.autoPick();   // nobody ready = look again after another gap
+        if (pick) this.startFight(pick.team, pick.robot, 'patrol', true);
+      } else break;
     }
   }
 
   /** Offline catch-up: camp (capped) + the wilds. Returns what happened for the welcome-back card. */
-  catchUp(ms: number, now = Date.now()): { ms: number; scrap: number; levels: number; waiting: number; got: Partial<Record<ItemId, number>>; eggs: number } {
+  catchUp(ms: number, now = Date.now()): { ms: number; scrap: number; levels: number; waiting: number; got: Partial<Record<ItemId, number>>; eggs: number; wins: number } {
     const capped = Math.min(Math.max(0, ms), this.offlineCap);
     const before = this.s.scrap;
     const g0 = { ...this.s.gathered };
@@ -992,9 +1083,10 @@ export class World {
     const evs = this.drain();
     const levels = evs.filter(e => e.t === 'level').length;
     const eggs = evs.filter(e => e.t === 'eggLaid').length;
+    const wins = evs.filter(e => e.t === 'fightWon').length;
     const got: Partial<Record<ItemId, number>> = {};
     for (const [k, v] of Object.entries(this.s.gathered) as [ItemId, number][]) { const d = v - (g0[k] ?? 0); if (d > 0) got[k] = d; }
-    return { ms: capped, scrap: this.s.scrap - before, levels, waiting: this.here.length, got, eggs };
+    return { ms: capped, scrap: this.s.scrap - before, levels, waiting: this.here.length, got, eggs, wins };
   }
 }
 
@@ -1003,13 +1095,19 @@ export function migrate(raw: any, now = Date.now()): GameState {
   const fresh = newGame(undefined, now);
   if (!raw || typeof raw !== 'object') return fresh;
   const num = (v: any, d: number) => (typeof v === 'number' && isFinite(v) ? v : d);
+  // 0.13 changed the rules from the ground up (team, energy, candy, level caps), so older saves start over.
+  if (num(raw.version, 0) < 9) {
+    const played = (Array.isArray(raw.bag) && raw.bag.length > 0) || num(raw.stats?.caught, 0) > 0;
+    if (played) fresh.newRules = true;
+    return fresh;
+  }
   const bagMax = Math.max(RULES.bagMax, Math.min(500, num(raw.bagMax, RULES.bagMax) | 0));
   const bag: Greeble[] = Array.isArray(raw.bag)
     ? raw.bag.filter((g: any) => g && typeof g.u === 'string' && hasMorph(g.sp))
         .map((g: any) => ({
           u: g.u, sp: g.sp, lv: Math.min(RULES.maxLevel, Math.max(1, num(g.lv, 1) | 0)), xp: Math.max(0, num(g.xp, 0)),
           // 0.1 Greebles had no stars: they come over as 3★ (a thank-you for playing early).
-          stars: Math.min(5, Math.max(1, num(g.stars, 3) | 0)), prism: g.prism === true, caughtAt: num(g.caughtAt, 0) || undefined,
+          stars: Math.min(5, Math.max(1, num(g.stars, 3) | 0)), prism: g.prism === true, en: Math.min(RULES.maxEnergy, Math.max(0, num(g.en, RULES.maxEnergy))), caughtAt: num(g.caughtAt, 0) || undefined,
         }))
         .slice(0, bagMax)
     : [];
@@ -1017,18 +1115,21 @@ export function migrate(raw: any, now = Date.now()): GameState {
   const slots = Math.min(RULES.maxCampSlots, Math.max(RULES.campSlots, Array.isArray(raw.camp) ? raw.camp.length : RULES.campSlots));
   const camp: (string | null)[] = Array(slots).fill(null);
   if (Array.isArray(raw.camp)) raw.camp.slice(0, slots).forEach((u: any, i: number) => { if (typeof u === 'string' && ids.has(u) && !camp.includes(u)) camp[i] = u; });
+  const teamLen = Math.min(TEAM_MAX, Math.max(RULES.teamSlots, Array.isArray(raw.team) ? raw.team.length : 0, RULES.teamSlots + Math.max(0, num(raw.upgrades?.squad, 0) | 0)));
+  const team: (string | null)[] = Array(teamLen).fill(null);
+  if (Array.isArray(raw.team)) raw.team.slice(0, teamLen).forEach((u: any, i: number) => { if (typeof u === 'string' && ids.has(u) && !camp.includes(u) && !team.includes(u)) team[i] = u; });
   let fight: Fight | null = null;
   const f = raw.fight;
   const regIds = REGIONS.map(r => r.id) as string[];
   if (f && typeof f === 'object') {
     // 0.2 fights had a single Greeble ({u, hp, maxHp, wreck}); 0.3 has a team.
     const team: Fighter[] = (Array.isArray(f.team) ? f.team : [{ u: f.u, hp: f.hp, maxHp: f.maxHp }])
-      .filter((x: any) => x && ids.has(x.u) && !camp.includes(x.u)).slice(0, TEAM_MAX)
+      .filter((x: any) => x && ids.has(x.u) && team.includes(x.u)).slice(0, TEAM_MAX)
       .map((x: any) => ({ u: x.u, hp: num(x.hp, 1), maxHp: num(x.maxHp, 1), charge: Math.max(0, num(x.charge, 0) | 0), boost: x.boost === true }));
     const kind: FightKind = f.kind === 'boss' || f.kind === 'wreck' ? f.kind : f.wreck === true ? 'wreck' : 'patrol';
     if (team.length && (kind === 'boss' || robot(f.robot))) {
       fight = { team, u: team[0].u, robot: kind === 'boss' ? 'boss' : f.robot, robotHp: num(f.robotHp, 1), robotMax: num(f.robotMax, 1),
-        carry: Math.max(0, num(f.carry, 0)), kind, reg: (regIds.includes(f.reg) ? f.reg : 'ash') as RegionId };
+        carry: Math.max(0, num(f.carry, 0)), kind, reg: (regIds.includes(f.reg) ? f.reg : 'ash') as RegionId, ...(f.auto === true ? { auto: true } : {}) };
     }
   }
   const known = (o: any) => { const r: Record<string, true> = {}; for (const k of Object.keys(o && typeof o === 'object' ? o : {})) if (hasMorph(k)) r[k] = true; return r; };
@@ -1068,7 +1169,10 @@ export function migrate(raw: any, now = Date.now()): GameState {
     expo: raw.expo && ids.has(raw.expo.u) && regIds.includes(raw.expo.reg) ? { u: raw.expo.u, until: num(raw.expo.until, 0), reg: raw.expo.reg } : null,
     expoDay: Math.max(0, num(raw.expoDay, 0) | 0),
     bestEver: { caught: Math.max(0, num(raw.bestEver?.caught, 0)), bosses: Math.max(0, num(raw.bestEver?.bosses, 0)) },
-    nest: (() => { const n = Array.isArray(raw.nest) ? raw.nest : []; const a = typeof n[0] === 'string' && ids.has(n[0]) && !camp.includes(n[0]) ? n[0] : null; const b = typeof n[1] === 'string' && ids.has(n[1]) && n[1] !== a && !camp.includes(n[1]) ? n[1] : null; return [a, b] as [string | null, string | null]; })(),
+    nest: (() => { const n = Array.isArray(raw.nest) ? raw.nest : []; const free = (u: any) => typeof u === 'string' && ids.has(u) && !camp.includes(u) && !team.includes(u); const a = free(n[0]) ? n[0] : null; const b = free(n[1]) && n[1] !== a ? n[1] : null; return [a, b] as [string | null, string | null]; })(),
+    team, autoPatrol: raw.autoPatrol !== false, patrolCarry: Math.max(0, num(raw.patrolCarry, 0)),
+    candy: Object.fromEntries(Object.entries(raw.candy ?? {}).filter(([k, v]) => hasMorph(k) && typeof v === 'number' && isFinite(v) && v >= 0).map(([k, v]) => [k, Math.floor(v as number)])) as Record<string, number>,
+    ...(raw.newRules === true ? { newRules: true } : {}),
     nestCarry: Math.max(0, num(raw.nestCarry, 0)),
     eggs: Array.isArray(raw.eggs) ? raw.eggs.filter((e: any) => e && typeof e.id === 'string' && hasMorph(e.sp)).slice(0, EGG_MAX)
       .map((e: any) => ({ id: e.id, sp: e.sp, prism: e.prism === true, stars: Math.min(5, Math.max(1, num(e.stars, 1) | 0)), left: Math.max(0, num(e.left, 0)), total: Math.max(1, num(e.total, 1)) })) : [],

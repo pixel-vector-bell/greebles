@@ -244,13 +244,39 @@ export const RULES = {
   wildSimMaxMs: 3 * HOUR,
   // camp / bag / fights
   bagMax: 50, campSlots: 4, maxCampSlots: 8,
-  campTickMs: 15_000, campXp: 3,
+  campTickMs: 15_000,
   fightTickMs: 1000, maxLevel: 40,
+  // 0.13: the team, energy and auto-patrol
+  teamSlots: 3, maxEnergy: 10,
+  /** One energy comes back this often while resting in camp… */
+  enCampMs: 10 * MIN,
+  /** …and this often anywhere else (on the team, in the bag). */
+  enRestMs: 40 * MIN,
+  /** Auto-patrol picks a new fight this long after the last one ends. */
+  patrolGapMs: 2 * MIN,
   offlineCapMs: 8 * HOUR,
   startScrap: 50,
 } as const;
 
-export const xpNeed = (lv: number) => 20 + lv * 12;
+/** 0.13: a much steeper curve (level 10 ≈ 1,060 xp in total, level 30 ≈ 15,500). */
+export const xpNeed = (lv: number) => Math.round(30 + 10 * lv + 1.2 * lv * lv);
+/** Highest level your Greebles can reach after beating N area bosses (in order). */
+export const LEVEL_CAPS = [12, 20, 28, 34, 40] as const;
+/** Xp past the cap is kept (up to this many of the next level's worth) and pays out when the cap goes up. */
+export const XP_BANK_LEVELS = 1;
+/** Energy each fighter spends to start a fight. */
+export const ENERGY_COST = { patrol: 1, wreck: 2, boss: 3 } as const;
+/** Auto-patrol stops when a Greeble is down to this much energy, so the team can always take on a boss. */
+export const AUTO_RESERVE = 3;
+/** Candy (one kind per family): how much you get. */
+export const CANDY = { catch: 5, goodStars: 2, prismMult: 2, hatch: 8, home: 2, expo: 5 } as const;
+/** Candy to evolve out of this stage (rare and epic families cost more). */
+export function evoCandy(m: Morph): number {
+  const pricey = m.rarity === 'rare' || m.rarity === 'epic' || m.rarity === 'legendary';
+  return m.stage === 1 ? (pricey ? 50 : 25) : (pricey ? 120 : 60);
+}
+/** Scrap from camp and from patrols is much lower than before 0.13 (bosses still pay big). */
+export const CAMP_SCRAP_MULT = 0.07, PATROL_SCRAP_MULT = 0.5;
 
 /** Field guide rewards for catching N different kinds. */
 export interface Reward { id: string; need: number; label: string; give: Partial<Record<ItemId | 'bag' | 'camp', number>> }
@@ -282,43 +308,50 @@ export interface Region {
   favor: Role;
   /** Robots here are this much tougher. */
   mult: number;
+  /** 0.13: patrol xp here (robots are tougher, but xp grows slowly so levelling stays steady). */
+  xpMult: number;
   kinds: string[];
   legendary: string;
   boss: Boss;
 }
 export const REGIONS: Region[] = [
-  { id: 'ash', name: 'Ash Flats', icon: '🏜️', blurb: 'Where you crashed. Dusty, warm, and full of young Greebles.', lvl: 0, mult: 1, favor: 'mine',
+  { id: 'ash', name: 'Ash Flats', icon: '🏜️', blurb: 'Where you crashed. Dusty, warm, and full of young Greebles.', lvl: 0, mult: 0.6, xpMult: 1, favor: 'mine',
     kinds: ['ashpup', 'vorr', 'scrappling', 'velm', 'skarnox', 'tidling', 'umberith', 'zoln', 'phaest'], legendary: 'quorvex',
-    boss: { name: 'Rust Warden', hp: 120, atk: 9, xp: 150, scrap: 300, el: 'rust' } },
-  { id: 'tide', name: 'Tide Pools', icon: '🌊', blurb: 'Warm shallow water. Trawl Greebles love it here.', lvl: 6, mult: 2.2, favor: 'fish',
+    boss: { name: 'Rust Warden', hp: 1100, atk: 4, xp: 150, scrap: 300, el: 'rust' } },
+  { id: 'tide', name: 'Tide Pools', icon: '🌊', blurb: 'Warm shallow water. Trawl Greebles love it here.', lvl: 5, mult: 2.2, xpMult: 0.7, favor: 'fish',
     kinds: ['tidling', 'iskari', 'vesperid', 'thalune', 'orryx', 'caelith', 'shellit', 'coralin', 'vorr'], legendary: 'aelurion',
-    boss: { name: 'Tide Dredger', hp: 500, atk: 18, xp: 400, scrap: 1200, el: 'tide' } },
-  { id: 'rust', name: 'Rust Fields', icon: '⚙️', blurb: 'An old robot junkyard. The robots here hit hard.', lvl: 12, mult: 4, favor: 'fight',
+    boss: { name: 'Tide Dredger', hp: 1950, atk: 5, xp: 400, scrap: 1200, el: 'tide' } },
+  { id: 'rust', name: 'Rust Fields', icon: '⚙️', blurb: 'An old robot junkyard. The robots here hit hard.', lvl: 10, mult: 4, xpMult: 0.55, favor: 'fight',
     kinds: ['scrappling', 'velm', 'hokari', 'pyrrax', 'nyxil', 'umberith', 'zoln', 'boltik', 'cogling'], legendary: 'myrrhax',
-    boss: { name: 'Scrap Colossus', hp: 1200, atk: 30, xp: 900, scrap: 4000, el: 'storm' } },
-  { id: 'glass', name: 'Glass Spires', icon: '💎', blurb: 'Tall crystal towers that glow at night. The rarest Greebles live here.', lvl: 18, mult: 7, favor: 'mine',
+    boss: { name: 'Scrap Colossus', hp: 3200, atk: 9, xp: 900, scrap: 4000, el: 'storm' } },
+  { id: 'glass', name: 'Glass Spires', icon: '💎', blurb: 'Tall crystal towers that glow at night. The rarest Greebles live here.', lvl: 15, mult: 7, xpMult: 0.5, favor: 'mine',
     kinds: ['klyx', 'vesperid', 'hokari', 'shardy', 'lumen', 'iskari', 'phaest', 'caelith', 'nyxil'], legendary: 'aurelith',
-    boss: { name: 'Prism Sentinel', hp: 2500, atk: 45, xp: 2000, scrap: 12000, el: 'glass' } },
-  { id: 'void', name: 'Void Rift', icon: '🕳️', blurb: 'A crack in the planet where the sky leaks in. Robots guard it fiercely.', lvl: 24, mult: 12, favor: 'fight',
+    boss: { name: 'Prism Sentinel', hp: 9000, atk: 13, xp: 2000, scrap: 12000, el: 'glass' } },
+  { id: 'void', name: 'Void Rift', icon: '🕳️', blurb: 'A crack in the planet where the sky leaks in. Robots guard it fiercely.', lvl: 20, mult: 12, xpMult: 0.65, favor: 'fight',
     kinds: ['riftling', 'glimmet', 'echolet', 'hokari', 'nyxil', 'vesperid', 'lumen', 'klyx'], legendary: 'riftking',
-    boss: { name: 'Null Engine', hp: 5000, atk: 65, xp: 4000, scrap: 30000, el: 'void' } },
+    boss: { name: 'Null Engine', hp: 13000, atk: 12, xp: 4000, scrap: 30000, el: 'void' } },
 ];
 export const region = (id: string): Region => REGIONS.find(r => r.id === id) ?? REGIONS[0];
 export const regionIndex = (id: string) => Math.max(0, REGIONS.findIndex(r => r.id === id));
 export const BOSS_REMATCH_MS = 2 * 60 * 60 * 1000;
-export const TEAM_MAX = 3;
+/** Most Greebles a team can ever have (start with RULES.teamSlots, buy more with the Team upgrade). */
+export const TEAM_MAX = 6;
 /** Robot stats in an area: tougher the further you go. */
-export const robotIn = (rb: Robot, reg: Region) => ({ hp: Math.round(rb.hp * reg.mult), atk: Math.round(rb.atk * Math.sqrt(reg.mult)), xp: Math.round(rb.xp * reg.mult) });
+export const robotIn = (rb: Robot, reg: Region) => ({ hp: Math.round(rb.hp * reg.mult), atk: Math.round(rb.atk * Math.sqrt(reg.mult)), xp: Math.round((rb.xp + 8) * reg.xpMult) });
+/** Wild Greebles are always a few levels under your level cap, so you still have to train them. */
+export const WILD_UNDER_CAP = 8;
 
 // ── 0.3: camp upgrades (bought with scrap) ─────────────────
-export type UpgradeId = 'tent' | 'bag' | 'away' | 'bench' | 'press';
+export type UpgradeId = 'tent' | 'bag' | 'away' | 'bench' | 'press' | 'squad' | 'bedroll';
 export interface UpgradeDef { id: UpgradeId; name: string; icon: string; desc: string; prices: number[]; effect: (lv: number) => string }
 export const UPGRADES: UpgradeDef[] = [
-  { id: 'tent', name: 'Extra tent', icon: '⛺', desc: 'One more camp spot (up to 8 total).', prices: [500, 1500, 4000, 10000], effect: lv => `+${lv} spot${lv === 1 ? '' : 's'}` },
-  { id: 'bag', name: 'Bigger bag', icon: '🎒', desc: '+10 bag space.', prices: [200, 400, 800, 1600, 3200, 6400, 12800, 25600], effect: lv => `+${lv * 10} space` },
-  { id: 'away', name: 'Night watch', icon: '🔦', desc: 'Camp keeps earning longer while you are away.', prices: [800, 2500, 6000, 15000], effect: lv => `${8 + lv * 4} h away` },
-  { id: 'bench', name: 'Workbench', icon: '🔨', desc: 'Campers earn 10% more scrap.', prices: [300, 750, 1900, 4700, 11700], effect: lv => `+${lv * 10}% scrap` },
-  { id: 'press', name: 'Snare press', icon: '🟢', desc: 'Makes free Snares, even while you are away.', prices: [1000, 4000, 12000], effect: lv => `${lv * 2} Snares / hour` },
+  { id: 'squad', name: 'Bigger team', icon: '🛡️', desc: 'One more team spot (up to 6).', prices: [3000, 12000, 40000], effect: lv => `${3 + lv} on the team` },
+  { id: 'bedroll', name: 'Bedrolls', icon: '🛏️', desc: 'Greebles get energy back 25% faster.', prices: [2500, 9000, 30000], effect: lv => `+${lv * 25}% energy` },
+  { id: 'tent', name: 'Extra tent', icon: '⛺', desc: 'One more camp spot (up to 8 total).', prices: [1500, 6000, 18000, 45000], effect: lv => `+${lv} spot${lv === 1 ? '' : 's'}` },
+  { id: 'bag', name: 'Bigger bag', icon: '🎒', desc: '+10 bag space.', prices: [600, 1500, 3500, 8000, 16000, 30000, 50000, 80000], effect: lv => `+${lv * 10} space` },
+  { id: 'away', name: 'Night watch', icon: '🔦', desc: 'Camp keeps earning longer while you are away.', prices: [2500, 9000, 24000, 50000], effect: lv => `${8 + lv * 4} h away` },
+  { id: 'bench', name: 'Workbench', icon: '🔨', desc: 'Campers earn 10% more scrap.', prices: [900, 2500, 7000, 18000, 40000], effect: lv => `+${lv * 10}% scrap` },
+  { id: 'press', name: 'Snare press', icon: '🟢', desc: 'Makes free Snares, even while you are away.', prices: [3000, 12000, 36000], effect: lv => `${lv * 2} Snares / hour` },
 ];
 export const PRESS_MS_PER_SNARE = 30 * 60 * 1000;  // per level: 1 snare / 30 min
 
@@ -385,9 +418,8 @@ export const TASK_POOL: TaskDef[] = [
   { id: 'catchEl', key: 'catch:', need: 4, label: 'Catch 4 {el} Greebles', el: true },
   { id: 'perfect', key: 'perfect', need: 3, label: 'Land 3 Perfect throws' },
   { id: 'nice', key: 'goodThrow', need: 6, label: 'Land 6 Nice (or better) throws' },
-  { id: 'patrol', key: 'patrol', need: 5, label: 'Break 5 patrol robots' },
+  { id: 'patrol', key: 'patrol', need: 8, label: 'Break 8 patrol robots' },
   { id: 'craft', key: 'craft', need: 2, label: 'Make 2 things at the Workbench' },
-  { id: 'graft', key: 'graft', need: 2, label: 'Graft 2 Greebles' },
   { id: 'evolve', key: 'evolve', need: 1, label: 'Evolve a Greeble' },
   { id: 'hatch', key: 'hatch', need: 1, label: 'Hatch an egg' },
 ];

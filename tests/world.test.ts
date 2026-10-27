@@ -6,7 +6,13 @@ import { ELEMENTS, FAMILIES, HUNTS, MORPHS, RECIPES, REGIONS, RULES, SPAWNABLE, 
 const T0 = 1_800_000_000_000;
 const MIN = 60_000, HOUR = 60 * MIN;
 const fresh = (seed = 7) => new World(newGame(seed, T0));
-const give = (w: World, sp: string, lv = 1, stars = 1) => { const u = `g${w.s.nextId++}`; w.s.bag.push({ u, sp, lv, xp: 0, stars, prism: false }); return u; };
+const give = (w: World, sp: string, lv = 1, stars = 1) => { const u = `g${w.s.nextId++}`; w.s.bag.push({ u, sp, lv, xp: 0, stars, prism: false, en: RULES.maxEnergy }); return u; };
+/** A Greeble on the team (0.13: only the team fights). Makes room on the team if it's full. */
+const fighter = (w: World, sp: string, lv = 1, stars = 1) => {
+  const u = give(w, sp, lv, stars);
+  if (!w.s.team.includes(null)) { if (w.s.team.length < 6) w.s.team.push(null); else w.s.team[0] = null; }
+  expect(w.toTeam(u).ok).toBe(true); return u;
+};
 /** Put one Greeble in the wilds and start catching it. */
 const meet = (w: World, sp = 'ashpup', lv = 1) => { const x = w.addSpawn(T0, 'wild', sp); x.lv = lv; w.drain(); expect(w.startEncounter(x.id).ok).toBe(true); return x; };
 
@@ -159,17 +165,19 @@ describe('catching', () => {
 describe('evolving', () => {
   it('level evolutions are offered once the level is reached, and fill the guide', () => {
     const w = fresh();
-    const u = give(w, 'ashpup', 9);
+    const u = give(w, 'ashpup', 9); w.s.candy.ashpup = 100;
     expect(w.evoOptions(w.get(u)!, T0).every(o => !o.ready)).toBe(true);
     w.get(u)!.lv = 10;
     expect(w.evolve(u, 'gleck', T0).ok).toBe(true);
+    expect(w.s.candy.ashpup).toBe(100 - 25);
     expect(w.get(u)!.sp).toBe('gleck');
     expect(w.s.caught.gleck).toBe(true);
   });
 
   it('item evolutions use up the item; branch evolutions let you pick', () => {
     const w = fresh();
-    const u = give(w, 'klyx', 18);
+    const u = give(w, 'klyx', 18); w.s.candy.klyx = 99;
+    w.s.bossBeaten = { ash: T0 };
     expect(w.evolve(u, 'klyxen', T0).ok).toBe(false);
     w.s.items.moon = 1;
     expect(w.evolve(u, 'klyxen', T0).ok).toBe(true);
@@ -179,36 +187,51 @@ describe('evolving', () => {
 
   it('night evolutions only work at night', () => {
     const w = fresh();
-    const u = give(w, 'vesperid', 16);
+    const u = give(w, 'vesperid', 16); w.s.candy.vesperid = 99;
     let day = T0; while (isNight(day)) day += MIN;
     let night = T0; while (!isNight(night)) night += MIN;
     expect(w.evolve(u, 'vesperax', day).ok).toBe(false);
     expect(w.evolve(u, 'vesperax', night).ok).toBe(true);
   });
 
-  it('graft gives xp and can raise stars (keeps the better stars)', () => {
+  it('0.13: evolving costs family candy; catching, hatching and sending home give it', () => {
     const w = fresh();
-    const a = give(w, 'ashpup', 3, 2); give(w, 'ashpup', 4, 4);
-    expect(w.graft(a).ok).toBe(true);
-    expect(w.get(a)!.stars).toBe(4);
-    expect(w.get(a)!.lv).toBeGreaterThan(3);
-    expect(w.s.bag.length).toBe(1);
+    const u = give(w, 'ashpup', 10);
+    expect(w.evoOptions(w.get(u)!, T0)[0].why).toMatch(/candy/);
+    expect(w.evolve(u, 'gleck', T0).ok).toBe(false);
+    // a catch gives 5 (7 for a 4★ or better); the whole family shares it
+    const x = w.addSpawn(T0, 'wild', 'ashpup'); x.stars = 4; w.startEncounter(x.id); w.s.items.star = 1; w.throwSnare('star', 0);
+    expect(w.candyOf('ashpup')).toBe(7); expect(w.candyOf('gleckor')).toBe(7);
+    // sending one home gives 2
+    const extra = w.s.bag[w.s.bag.length - 1].u;
+    expect(w.sell(extra).ok).toBe(true); expect(w.candyOf('ashpup')).toBe(9);
+    w.s.candy.ashpup = 25;
+    expect(w.evolve(u, 'gleck', T0).ok).toBe(true); expect(w.candyOf('gleck')).toBe(0);
+    // stage 2 → 3 costs more
+    w.get(u)!.lv = 25; w.s.bossBeaten = { ash: T0, tide: T0, rust: T0 };
+    w.s.candy.ashpup = 59; expect(w.evolve(u, 'gleckor', T0).ok).toBe(false);
+    w.s.candy.ashpup = 60; expect(w.evolve(u, 'gleckor', T0).ok).toBe(true);
   });
 
-  it('graft lets you pick which copy gets fed in', () => {
+  it('0.13: grafting is gone', () => {
+    const w = fresh() as any;
+    expect(w.graft).toBeUndefined(); expect(w.graftPartners).toBeUndefined();
+  });
+
+  it('0.13: levels stop at the cap until the next boss falls; extra xp is kept and pays out', () => {
     const w = fresh();
-    const keep = give(w, 'ashpup', 5, 2); const weak = give(w, 'ashpup', 2, 1); const strong = give(w, 'ashpup', 9, 4);
-    expect(w.graftPartners(keep).map(g => g.u)).toEqual([weak, strong]);
-    const pv = w.graftPreview(w.get(keep)!, w.get(strong)!);
-    expect(pv.starsSure).toBe(4); expect(pv.lvTo).toBeGreaterThan(5);
-    expect(w.graft(keep, strong).ok).toBe(true);
-    expect(w.get(strong)).toBeUndefined(); expect(w.get(weak)).toBeDefined();
-    expect(w.get(keep)!.stars).toBe(4);
-    expect(w.get(keep)!.lv).toBe(pv.lvTo);
-    // can't feed in a different kind, or itself
-    const other = give(w, 'tidling', 3, 1);
-    expect(w.graft(keep, other).ok).toBe(false);
-    expect(w.graft(keep, keep).ok).toBe(false);
+    const u = fighter(w, 'draug', 11, 3);
+    expect(w.levelCap).toBe(12);
+    const g = w.get(u)!;
+    (w as any).addXp(g, 50_000);
+    expect(g.lv).toBe(12); expect(g.xp).toBe(w.bankMax(g));
+    w.s.bossBeaten.ash = T0; (w as any).raiseCap();
+    expect(w.levelCap).toBe(20); expect(g.lv).toBeGreaterThan(12);
+    // wild Greebles are always well under the cap
+    for (let i = 0; i < 100; i++) expect(w.addSpawn(T0, 'wild').lv).toBeLessThanOrEqual(20 - 8);
+    // camp gives no xp any more
+    const c = give(w, 'ashpup', 3); w.assign(c); w.advance(HOUR, T0);
+    expect(w.get(c)!.lv).toBe(3); expect(w.get(c)!.xp).toBe(0);
   });
 });
 
@@ -235,7 +258,7 @@ describe('camp, shop and robots', () => {
   it('beating a wreck robot releases a burst of Greebles', () => {
     const w = fresh();
     w.s.wreck = { robot: 'drone', until: T0 + HOUR };
-    const f = give(w, 'draug', 20, 5);
+    const f = fighter(w, 'draug', 20, 5);
     expect(w.wouldWin(f, 'drone', true)).toBe(true);
     expect(w.startFight(f, 'drone', true).ok).toBe(true);
     w.s.spawns = [];
@@ -248,7 +271,8 @@ describe('camp, shop and robots', () => {
   it('the win check matches a real fight', () => {
     const w = fresh();
     for (const lv of [1, 3, 6, 10, 20]) for (const r of ['drone', 'pylon', 'colossus']) {
-      const u = give(w, 'velm', lv); const guess = w.wouldWin(u, r);
+      w.s.team = [null, null, null]; w.s.autoPatrol = false;
+      const u = fighter(w, 'velm', lv); const guess = w.wouldWin(u, r);
       w.startFight(u, r); w.advance(120_000, T0);
       expect(w.s.stats.wins > 0).toBe(guess); w.s.stats.wins = 0; w.s.stats.losses = 0;
     }
@@ -256,18 +280,14 @@ describe('camp, shop and robots', () => {
 });
 
 describe('saves', () => {
-  it('0.1 saves carry over: Greebles come as 3★ and get starter snares', () => {
-    const old = { scrap: 120, bag: [{ u: 'g1', sp: 'draug', lv: 12, xp: 5 }, { u: 'g2', sp: 'nulith', lv: 3, xp: 0 }, { u: 'g3', sp: 'gone', lv: 1 }],
-      camp: ['g2', null, null, null], huntAt: 0, campCarry: 0, fight: null, seen: { draug: true }, stats: { caught: 2 }, lastSeen: T0, tips: { walk: true } };
+  it('0.13: saves from before the new rules start over (with a one-time notice)', () => {
+    const old = { version: 8, scrap: 99999, bag: [{ u: 'g1', sp: 'draug', lv: 30, xp: 5, stars: 5 }], camp: ['g1'], stats: { caught: 40 }, lastSeen: T0 };
     const s = migrate(old, T0);
-    expect(s.version).toBe(8);
-    expect(s.region).toBe('ash'); expect(s.unlocked).toBe(1);
-    expect(s.bag.map(g => g.sp)).toEqual(['draug', 'nulith']);
-    expect(s.bag[0].stars).toBe(3);
-    expect(s.camp[0]).toBe('g2');
-    expect(s.items.snare).toBeGreaterThanOrEqual(20);
-    expect(s.caught.draug && s.caught.nulith).toBe(true);
+    expect(s.version).toBe(9); expect(s.bag).toEqual([]); expect(s.scrap).toBe(RULES.startScrap);
+    expect(s.newRules).toBe(true); expect(s.intro).toBe(0); expect(s.caught).toEqual({});
     expect(s.spawns.length).toBeGreaterThan(0);
+    // an empty old save (never played) just starts fresh with no notice
+    expect(migrate({ version: 3, bag: [] }, T0).newRules).toBeUndefined();
   });
 
   it('round-trips through JSON', () => {
@@ -279,10 +299,12 @@ describe('saves', () => {
   });
 
   it('cleans up junk without crashing', () => {
-    const s = migrate({ version: 2, bag: [{ u: 'g1', sp: 'nope' }, { u: 'g2', sp: 'velm', lv: 99, stars: 9 }, null], camp: ['g1', 'g2', 'g2'], scrap: 'lots',
+    const s = migrate({ version: 9, bag: [{ u: 'g1', sp: 'nope' }, { u: 'g2', sp: 'velm', lv: 99, stars: 9, en: 99 }, null], camp: ['g1', 'g2', 'g2'], team: ['g2', 'zz'], scrap: 'lots', candy: { velm: 5, nope: 3, ashpup: -1 },
       items: { snare: -4, good: 'x', beacon: 2 }, spawns: [{ id: 'w1', sp: 'zzz' }], enc: { spawn: 'w9' } }, T0);
     expect(s.bag.map(g => g.u)).toEqual(['g2']);
-    expect(s.bag[0].lv).toBe(RULES.maxLevel); expect(s.bag[0].stars).toBe(5);
+    expect(s.bag[0].lv).toBe(RULES.maxLevel); expect(s.bag[0].stars).toBe(5); expect(s.bag[0].en).toBe(RULES.maxEnergy);
+    expect(s.team).toEqual([null, null, null]);   // it's camping, so it can't also be on the team
+    expect(s.candy).toEqual({ velm: 5 });
     expect(s.items.snare).toBeUndefined(); expect(s.items.beacon).toBe(2);
     expect(s.spawns).toEqual([]); expect(s.enc).toBeNull();
     expect(migrate(null, T0).bag).toEqual([]);
@@ -301,7 +323,7 @@ describe('0.3: areas, bosses, camp upgrades', () => {
   });
 
   it('only the area you are in spawns its kinds, at its level', () => {
-    const w = fresh(); w.s.unlocked = 4; w.travel('glass');
+    const w = fresh(); w.s.unlocked = 4; w.s.bossBeaten = { ash: T0, tide: T0, rust: T0 }; w.travel('glass');
     const swarm = w.swarmKind(T0).id;
     for (let i = 0; i < 200; i++) { const x = w.addSpawn(T0, 'wild'); expect([...REGIONS[3].kinds, swarm]).toContain(x.sp); expect(x.lv).toBeGreaterThan(REGIONS[3].lvl); expect(x.reg).toBe('glass'); }
     expect(w.here.every(x => x.reg === 'glass')).toBe(true);
@@ -315,7 +337,7 @@ describe('0.3: areas, bosses, camp upgrades', () => {
 
   it('a team beats the first boss: opens the next area, calls out the Legendary, then rests 2 h', () => {
     const w = fresh();
-    const team = [give(w, 'draugoth', 25, 4), give(w, 'velmor', 20, 4), give(w, 'gleckor', 25, 3)];
+    const team = [fighter(w, 'draugoth', 25, 4), fighter(w, 'velmor', 20, 4), fighter(w, 'gleckor', 25, 3)];
     expect(w.wouldWin(team, 'boss', 'boss')).toBe(true);
     expect(w.startFight(team, 'boss', 'boss').ok).toBe(true);
     w.advance(120_000, T0);
@@ -329,7 +351,7 @@ describe('0.3: areas, bosses, camp upgrades', () => {
 
   it('a weak team loses to the boss and keeps its Greebles', () => {
     const w = fresh();
-    const u = give(w, 'scrappling', 1);
+    const u = fighter(w, 'scrappling', 1);
     expect(w.wouldWin([u], 'boss', 'boss')).toBe(false);
     w.startFight([u], 'boss', 'boss'); w.advance(300_000, T0);
     expect(w.s.unlocked).toBe(1); expect(w.get(u)).toBeDefined();
@@ -339,7 +361,7 @@ describe('0.3: areas, bosses, camp upgrades', () => {
     let agree = 0, total = 0;
     for (const lv of [5, 10, 15, 20, 25, 30]) {
       const w = fresh(lv);
-      const team = [give(w, 'draug', lv, 3), give(w, 'velm', lv, 3), give(w, 'skarnox', lv, 3)];
+      const team = [fighter(w, 'draug', lv, 3), fighter(w, 'velm', lv, 3), fighter(w, 'skarnox', lv, 3)];
       const guess = w.wouldWin(team, 'boss', 'boss');
       w.startFight(team, 'boss', 'boss'); w.advance(600_000, T0);
       total++; if ((w.s.stats.bosses > 0) === guess) agree++;
@@ -358,7 +380,7 @@ describe('0.3: areas, bosses, camp upgrades', () => {
     const slots = w.s.camp.length, bag = w.s.bagMax;
     expect(w.buyUpgrade('tent').ok).toBe(true); expect(w.s.camp.length).toBe(slots + 1);
     expect(w.buyUpgrade('bag').ok).toBe(true); expect(w.s.bagMax).toBe(bag + 10);
-    const u = give(w, 'gleck', 10); const before = w.yieldOf(w.get(u)!);
+    const u = give(w, 'gleckor', 30, 5); const before = w.yieldOf(w.get(u)!);
     w.buyUpgrade('bench'); expect(w.yieldOf(w.get(u)!)).toBeGreaterThan(before);
     w.buyUpgrade('away'); expect(w.offlineCap).toBe(RULES.offlineCapMs + 4 * HOUR);
     w.buyUpgrade('press'); const sn = w.count('snare'); w.advance(HOUR, T0); expect(w.count('snare')).toBe(sn + 2);
@@ -366,15 +388,13 @@ describe('0.3: areas, bosses, camp upgrades', () => {
     expect(w.s.camp.length).toBeLessThanOrEqual(RULES.maxCampSlots);
   });
 
-  it('0.2 saves (single-Greeble fight, no areas) carry over', () => {
-    const old = { version: 2, bag: [{ u: 'g1', sp: 'draug', lv: 12, xp: 0, stars: 2, prism: false }], camp: [null, null, null, null],
-      fight: { u: 'g1', robot: 'drone', hp: 30, maxHp: 40, robotHp: 5, robotMax: 16, carry: 0, wreck: false },
-      spawns: [{ id: 'w9', sp: 'ashpup', lv: 2, stars: 1, prism: false, src: 'wild', at: T0, until: T0 + HOUR, x: .5, y: .5 }], items: { snare: 5 } };
-    const s = migrate(old, T0);
-    expect(s.fight?.team[0].u).toBe('g1'); expect(s.fight?.kind).toBe('patrol');
-    expect(s.spawns[0].reg).toBe('ash');
-    const w = new World(s); w.advance(5000, T0);
-    expect(w.s.fight).toBeNull(); expect(w.s.stats.wins).toBe(1);
+  it('0.13: bigger team and bedrolls', () => {
+    const w = fresh(); w.s.scrap = 1_000_000;
+    expect(w.teamMax).toBe(3);
+    for (let i = 0; i < 5; i++) w.buyUpgrade('squad');
+    expect(w.teamMax).toBe(6); expect(w.s.team.length).toBe(6);
+    const g = w.get(give(w, 'ashpup'))!; const slow = w.enMs(g);
+    w.buyUpgrade('bedroll'); expect(w.enMs(g)).toBeLessThan(slow);
   });
 });
 
@@ -397,14 +417,14 @@ describe('0.4: elements, moves, robot parts', () => {
 
   it('any caste can fight a patrol now', () => {
     const w = fresh();
-    const u = give(w, 'gleck', 20, 4);
+    const u = fighter(w, 'gleck', 20, 4);
     expect(w.startFight(u, 'drone').ok).toBe(true);
     w.advance(60_000, T0); expect(w.s.stats.wins).toBe(1);
   });
 
   it('a tapped move does 3x and resets the charge; untapped fires at 2x on its own', () => {
     const w = fresh();
-    const u = give(w, 'draug', 5, 1);
+    const u = fighter(w, 'draug', 5, 1); w.s.autoPatrol = false;
     w.startFight(u, 'colossus');
     w.s.fight!.robotHp = w.s.fight!.robotMax = 1e6;    // won't end
     w.s.fight!.team[0].hp = w.s.fight!.team[0].maxHp = 1e6;
@@ -422,7 +442,7 @@ describe('0.4: elements, moves, robot parts', () => {
 
   it('robots drop gears; gears craft into items', () => {
     const w = fresh();
-    const u = give(w, 'draugoth', 25, 5);
+    const u = fighter(w, 'draugoth', 25, 5);
     w.startFight(u, 'drone'); w.advance(60_000, T0);
     expect(w.count('gear')).toBeGreaterThan(0);
     w.s.items.gear = 100; w.s.items.core = 10;
@@ -434,7 +454,7 @@ describe('0.4: elements, moves, robot parts', () => {
 
   it('bosses always drop Power Cores', () => {
     const w = fresh();
-    const team = [give(w, 'draugoth', 30, 5), give(w, 'velmor', 30, 5), give(w, 'skarnex', 30, 5)];
+    const team = [fighter(w, 'draugoth', 30, 5), fighter(w, 'velmor', 30, 5), fighter(w, 'skarnex', 30, 5)];
     w.startFight(team, 'boss', 'boss'); w.advance(300_000, T0);
     expect(w.s.stats.bosses).toBe(1); expect(w.count('core')).toBeGreaterThan(0);
   });
@@ -506,7 +526,7 @@ describe('0.6: ship, signal home, perks, expeditions, swarm', () => {
     const reward = w.signalReward;
     expect(w.signalHome(keep, T0).ok).toBe(true);
     expect(w.s.signals).toBe(1); expect(w.s.sp).toBe(reward);
-    expect(w.s.bag.length).toBe(3); expect(w.s.bag[0].lv).toBe(15);
+    expect(w.s.bag.length).toBe(3); expect(w.s.bag[0].lv).toBe(12);   // half level, but no higher than the first cap
     expect(w.s.caught.velm).toBe(true);                    // guide kept
     expect(w.s.unlocked).toBe(1); expect(w.s.ship).toEqual({}); expect(w.s.scrap).toBe(RULES.startScrap);
     expect(w.foe('drone', 'patrol')!.hp).toBeGreaterThan(hpBefore);
@@ -595,16 +615,16 @@ describe('0.8: Mythic Hunts + Void Rift', () => {
     for (const p of ['hull', 'engine', 'fuel', 'antenna', 'nav'] as const) w.s.ship[p] = true;
     expect(w.signalHome([], T0).ok).toBe(true);
     expect(w.tallyOf('patrol')).toBe(12); expect(w.s.hunts['h_tide']).toBe(T0);
-    const old: any = JSON.parse(JSON.stringify(w.s)); delete old.tally; delete old.hunts; old.version = 6;
+    const old: any = JSON.parse(JSON.stringify(w.s)); delete old.tally; delete old.hunts; old.version = 9;
     const m = migrate(old, T0);
-    expect(m.tally).toEqual({}); expect(m.hunts).toEqual({}); expect(m.version).toBe(8);
+    expect(m.tally).toEqual({}); expect(m.hunts).toEqual({}); expect(m.version).toBe(9);
   });
 });
 
 
 describe('0.9: nest, eggs, daily tasks, intro', () => {
   const add = (w: World, sp: string, extra: Partial<{ stars: number; prism: boolean; lv: number }> = {}) => {
-    const g = { u: 'g' + w.s.nextId++, sp, lv: extra.lv ?? 5, xp: 0, stars: extra.stars ?? 3, prism: extra.prism ?? false };
+    const g = { u: 'g' + w.s.nextId++, sp, lv: extra.lv ?? 5, xp: 0, stars: extra.stars ?? 3, prism: extra.prism ?? false, en: RULES.maxEnergy };
     w.s.bag.push(g); return g.u;
   };
   it('two of the same family lay an egg every 2h, of the stage-1 kind', () => {
@@ -677,10 +697,84 @@ describe('0.9: nest, eggs, daily tasks, intro', () => {
   it('new games start the intro; old saves skip it; nest/eggs migrate', () => {
     expect(newGame(1, T0).intro).toBe(0);
     const old: any = JSON.parse(JSON.stringify(newGame(2, T0)));
-    delete old.intro; delete old.nest; delete old.eggs; delete old.daily; old.version = 7;
-    old.bag.push({ u: 'g99', sp: 'ashpup', lv: 3, xp: 0, stars: 2, prism: false });
+    delete old.intro; delete old.nest; delete old.eggs; delete old.daily; old.version = 9;
+    old.bag.push({ u: 'g99', sp: 'ashpup', lv: 3, xp: 0, stars: 2, prism: false, en: 10 });
     const m = migrate(old, T0);
     expect(m.intro).toBe(99); expect(m.nest).toEqual([null, null]); expect(m.eggs).toEqual([]); expect(m.daily).toBeNull();
   });
 });
 
+
+describe('0.13: team, energy, auto-patrol', () => {
+  it('a brand-new starter, or any 2 level-1 Ash Flats Greebles, beats an Ash drone (so Auto-patrol always gets going)', () => {
+    for (const sp of fresh().s.spawns.map(x => x.sp)) {
+      const w = fresh(); const u = fighter(w, sp, 1, 1);
+      expect(w.wouldWin(u, 'drone')).toBe(true); expect(w.autoPick()?.robot).toBeDefined();
+    }
+    const kinds = REGIONS[0].kinds;
+    for (const a of kinds) for (const b of kinds) {
+      const w = fresh(); fighter(w, a, 1, 1); fighter(w, b, 1, 1);
+      expect(w.autoPick()?.robot).toBeDefined();
+    }
+  });
+  it('only the team fights; moving to camp takes a Greeble off the team (and back in one tap)', () => {
+    const w = fresh(); w.s.autoPatrol = false;
+    const a = give(w, 'draug', 8, 3);
+    expect(w.startFight(a, 'drone').ok).toBe(false);          // not on the team
+    expect(w.toTeam(a).ok).toBe(true); expect(w.startFight(a, 'drone').ok).toBe(true);
+    w.advance(60_000, T0); expect(w.s.stats.wins).toBe(1);
+    expect(w.assign(a).ok).toBe(true); expect(w.inTeam(a)).toBe(false); expect(w.inCamp(a)).toBe(true);
+    expect(w.toTeam(a).ok).toBe(true); expect(w.inCamp(a)).toBe(false);
+    // swap a rested camper in for a tired team member
+    const b = give(w, 'velm', 8, 3); w.assign(b);
+    expect(w.swapIn(b, a).ok).toBe(true); expect(w.inTeam(b)).toBe(true); expect(w.inCamp(a)).toBe(true);
+  });
+  it('fights cost energy; a knocked-out Greeble has none left; energy comes back fastest in camp', () => {
+    const w = fresh(); w.s.autoPatrol = false;
+    const a = fighter(w, 'draug', 10, 3);
+    w.startFight(a, 'drone'); expect(w.energy(w.get(a)!)).toBe(9);
+    w.advance(60_000, T0);
+    // boss costs 3 each, and a weak one gets knocked out
+    const weak = fighter(w, 'ashpup', 1, 1);
+    w.startFight([a, weak], 'boss', 'boss'); w.advance(600_000, T0);
+    expect(w.get(weak)!.en).toBeLessThan(1);
+    // energy refills: 1 per 40 min on the team, 1 per 10 min in camp
+    const t = w.get(a)!; t.en = 0; w.advance(40 * MIN, T0); expect(w.energy(t)).toBe(1);
+    w.assign(a); t.en = 0; w.advance(40 * MIN, T0); expect(w.energy(t)).toBe(4);
+    // not enough energy = can't fight
+    w.toTeam(a); t.en = 0;
+    expect(w.startFight(a, 'drone').ok).toBe(false);
+  });
+  it('auto-patrol fights on its own (also offline) and keeps 3 energy back for bosses', () => {
+    const w = fresh();
+    const a = fighter(w, 'draug', 10, 3), b = fighter(w, 'velm', 10, 3);
+    const r = w.catchUp(8 * HOUR, T0 + 8 * HOUR);
+    expect(r.wins).toBeGreaterThan(10);
+    for (const u of [a, b]) expect(w.energy(w.get(u)!)).toBeGreaterThanOrEqual(3);
+    expect(w.get(a)!.lv).toBeGreaterThan(10);
+    // off = no fights
+    const w2 = fresh(); fighter(w2, 'draug', 10, 3); w2.setAutoPatrol(false);
+    expect(w2.catchUp(8 * HOUR, T0 + 8 * HOUR).wins).toBe(0);
+  });
+  it('offline catch-up gives the same result as playing it out in small steps', () => {
+    const mk = () => { const w = fresh(77); fighter(w, 'draug', 10, 3); fighter(w, 'velm', 9, 2); w.assign(give(w, 'ashpup', 4)); return w; };
+    const a = mk(), b = mk();
+    a.advance(3 * HOUR, T0);
+    for (let t = 0; t < 3 * HOUR; t += 250) b.advance(250, T0);
+    expect(b.s.stats.wins).toBe(a.s.stats.wins);
+    expect(b.s.bag.map(g => g.lv)).toEqual(a.s.bag.map(g => g.lv));
+    for (let i = 0; i < a.s.bag.length; i++) expect(Math.abs(b.s.bag[i].en - a.s.bag[i].en)).toBeLessThan(0.05);
+    expect(Math.round(b.s.scrap)).toBe(Math.round(a.s.scrap));
+  });
+  it('bosses hit the whole team; a team at the right level cap wins, one from the area before loses', () => {
+    const team = (w: World, sp: string[], lv: number) => sp.map(x => fighter(w, x, lv, 3));
+    const w = fresh(); w.s.scrap = 1e6; w.buyUpgrade('squad');
+    w.s.bossBeaten = { ash: T0 - 1e9 }; w.s.unlocked = 2; w.travel('tide');
+    const strong = team(w, ['draug', 'gleck', 'nulith', 'velmor'], 20);
+    expect(w.wouldWin(strong, 'boss', 'boss')).toBe(true);
+    const w2 = fresh(); w2.s.scrap = 1e6; w2.buyUpgrade('squad');
+    w2.s.bossBeaten = { ash: T0 - 1e9 }; w2.s.unlocked = 2; w2.travel('tide');
+    const weak = team(w2, ['scrappling', 'ashpup', 'tidling', 'velm'], 12);
+    expect(w2.wouldWin(weak, 'boss', 'boss')).toBe(false);
+  });
+});
