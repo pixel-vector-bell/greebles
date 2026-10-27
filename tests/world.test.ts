@@ -88,7 +88,7 @@ describe('the wilds', () => {
   it('Prismatics happen about 1 in 400', () => {
     const w = fresh(99);
     let p = 0; const N = 40_000;
-    for (let i = 0; i < N; i++) { if (w.addSpawn(T0, 'wild').prism) p++; if (i % 500 === 0) { w.s.spawns = []; w.drain(); } }
+    for (let i = 0; i < N; i++) { if (w.addSpawn(T0, 'wild').prism) p++; if (i % 50 === 0) { w.s.spawns = []; w.drain(); } }
     expect(p / N).toBeGreaterThan(1 / 600); expect(p / N).toBeLessThan(1 / 280);
   });
 
