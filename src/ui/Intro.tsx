@@ -18,19 +18,19 @@ interface Step {
 }
 
 const STEPS: Step[] = [
-  { title: 'Welcome, explorer!', text: 'Your ship crashed on a strange planet. The little natives here are called Greebles. They\'re friendly, and they\'ll help you survive, find scrap and fight off the robots. Let\'s catch your first one!', next: "Let's go" },
+  { title: 'Welcome, explorer!', text: 'You\'re stranded on a strange planet. The little natives here are called Greebles. They\'re friendly, and they\'ll help you explore, find scrap, and fight off the robots. Let\'s catch your first one!', next: "Let's go" },
   { title: 'Catch a Greeble', tab: 'wilds', point: '.gr-spawn', seed: true, text: 'Greebles wander into the Wilds. Tap one to go after it. When the ring around it is small, tap Throw. The smaller the ring, the better your throw!',
     done: w => w.s.stats.caught >= 1 },
   { title: 'Build your team', tab: 'fight', top: true, point: '.gr-teamadd .gr-btn.g', text: 'Nice catch! Your Team is who fights robots, and only the team gains xp. Tap "Add" to put your Greeble on the team.',
     done: w => w.teamList.length > 0 },
-  { title: 'Auto-patrol', tab: 'fight', point: '.gr-auto', text: 'Auto-patrol is on: your team fights a robot every couple of minutes, even while the game is closed. Each fight costs ⚡ energy, and energy comes back over time.', next: 'Got it' },
+  { title: 'Auto-patrol', tab: 'fight', point: '.gr-auto', text: 'Auto-patrol is on: your team fights a robot every couple of minutes, even while the game is closed. Each fight spends a ration. Trawlers in camp make rations.', next: 'Got it' },
   { title: 'Catch one more', tab: 'wilds', point: '.gr-spawn', seed: true, text: 'Now catch a second Greeble. This one can work in camp.',
     done: w => w.s.stats.caught >= 2 },
-  { title: 'Put it to work', tab: 'camp', top: true, point: '.gr-sendbag .gr-btn.g', text: 'Greebles in camp earn scrap and bring back materials, even while the game is closed. They also rest there: tired team members get energy back 4× faster in camp. Tap "Camp".',
+  { title: 'Put it to work', tab: 'camp', top: true, point: '.gr-sendbag .gr-btn.g', text: 'Greebles in camp earn scrap and bring back materials, even while the game is closed. Trawlers make rations for the team. Diggers make beacon charges so you can call more Greebles. Tap "Camp".',
     done: w => w.s.camp.some(Boolean) },
   { title: 'Candy & evolving', tab: 'bag', text: 'Every Greeble you catch gives candy for its family. To evolve, a Greeble needs the right level AND enough candy. Levels stop at a cap (🔒) until you beat the next area boss.', next: 'Got it' },
-  { title: 'Daily tasks', tab: 'wilds', point: '.gr-daily', text: 'Every day you get 3 small tasks here. Finish them for scrap and snares, plus a bonus when you finish all 3.', next: 'Nice' },
-  { title: "You're all set!", text: 'Catch more Greebles, train your team, beat the boss of each area, and fix your ship to get home. Each tab shows a quick tip the first time you open it. Have fun!', next: 'Start exploring' },
+  { title: 'Call more Greebles', tab: 'wilds', point: '.gr-beacon', text: 'When the Wilds are empty, turn on a Beacon. Diggers in camp make the charges. Greebles wander in fast for 30 minutes.', next: 'Nice' },
+  { title: "You're all set!", text: 'Catch more Greebles, train your team, and beat the boss of each area. Each tab shows a quick tip the first time you open it.', next: 'Start exploring' },
 ];
 
 export function Intro({ w, tab, setTab, save }: { w: World; tab: Tab; setTab: (t: Tab) => void; save: () => void }) {

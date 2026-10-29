@@ -33,7 +33,7 @@ export function runBot(days: number, seed = 11, opts: { sessions?: number[]; ses
     for (const r of REGIONS) if (w.s.bossBeaten[r.id] && log.boss[r.id] === undefined) log.boss[r.id] = day();
     if (log.firstEvolve === undefined && w.s.stats.evolved > 0) log.firstEvolve = day();
     if (log.firstStage3 === undefined && w.s.bag.some(g => morph(g.sp).stage === 3)) log.firstStage3 = day();
-    if (log.allUpgrades === undefined && UPGRADES.every(u => w.upgradePrice(u.id) === null || (u.id === 'tent' && w.s.camp.length >= 8))) log.allUpgrades = day();
+    if (log.allUpgrades === undefined && UPGRADES.filter(u => u.id !== 'bedroll').every(u => w.upgradePrice(u.id) === null || (u.id === 'tent' && w.s.camp.length >= 8))) log.allUpgrades = day();
   };
 
   const snareFor = (sp: string): SnareId => {
@@ -105,15 +105,32 @@ export function runBot(days: number, seed = 11, opts: { sessions?: number[]; ses
     }
     for (const u of [...w.s.team]) if (u && !best.includes(u) && !w.fighting(u)) w.offTeam(u);
     for (const u of best) w.toTeam(u);
+    const pin = (role: 'fish' | 'mine') => {
+      if (w.s.camp.some(u => u && morph(w.get(u)!.sp).role === role)) return;
+      let g = w.s.bag.find(x => !w.inTeam(x.u) && !w.fighting(x.u) && !w.inCamp(x.u) && morph(x.sp).role === role);
+      if (!g) {
+        const onTeam = w.teamList.filter(x => !w.fighting(x.u) && morph(x.sp).role === role);
+        if (onTeam.length && w.teamList.length > 2) { w.offTeam(onTeam[onTeam.length - 1].u); g = onTeam[onTeam.length - 1]; }
+      }
+      if (!g) return;
+      const slot = w.s.camp.findIndex(u => !u);
+      if (slot >= 0) w.assign(g.u, slot);
+    };
+    pin('fish'); pin('mine');
     const workers = [...w.s.bag].filter(g => !w.busy(g.u)).sort((a, b) => w.yieldOf(b) - w.yieldOf(a));
     for (let i = 0; i < w.s.camp.length; i++) {
       const cur = w.s.camp[i] ? w.get(w.s.camp[i]!) : undefined;
       const nx = workers[0];
       if (!nx) break;
+      if (cur && (morph(cur.sp).role === 'fish' || morph(cur.sp).role === 'mine')) {
+        const role = morph(cur.sp).role;
+        const another = w.s.camp.some((u, j) => j !== i && u && morph(w.get(u)!.sp).role === role);
+        if (!another) continue;
+      }
       if (!cur || w.yieldOf(nx) > w.yieldOf(cur)) { workers.shift(); w.assign(nx.u, i); }
     }
   };
-  const PRIORITY: UpgradeId[] = ['squad', 'bedroll', 'tent', 'bench', 'press', 'away', 'bag'];
+  const PRIORITY: UpgradeId[] = ['squad', 'tent', 'bench', 'press', 'away', 'bag'];
   const shop = () => {
     for (let guard = 0; guard < 20; guard++) {
       const opts = PRIORITY.map(id => ({ id, p: w.upgradePrice(id) })).filter(o => o.p !== null && !(o.id === 'tent' && w.s.camp.length >= 8)) as { id: UpgradeId; p: number }[];
