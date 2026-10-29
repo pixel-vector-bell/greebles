@@ -1,5 +1,15 @@
 # Greebles — What's New
 
+## 0.14.0 — A clearer way to play
+- Fights spend rations now, not energy. Trawlers in camp make the rations. You don't move tired Greebles back and forth to rest.
+- Diggers in camp make beacon charges. When the wilds are empty, turn a beacon on and more Greebles show up for 30 minutes.
+- Campers gain experience slowly, so a Digger or Trawler can evolve without joining the fight team.
+- A 5-star is a small bonus now, not a huge one. Stars are still set when you catch a Greeble. A Prismatic is still special.
+- Sending a Greeble home gives a little more candy for its family.
+- The ship, eggs, daily tasks, and expeditions are tucked away. The goal on screen is to beat each area's boss and fill the field guide.
+- The opening no longer says your ship crashed. You are stranded on the planet.
+- Your Greebles and progress carry over. This update does not erase your save.
+
 ## 0.13.0 — New rules: team, energy, candy & level caps (fresh start)
 - 🔄 The game was much too easy, so the rules changed from the ground up. Every save starts over, Field Guide included.
 - 🛡️ Your Team (Fight tab) is who fights. You start with 3 spots and can buy up to 6. Only the team gains xp. Campers work and rest, and they don't level up anymore.

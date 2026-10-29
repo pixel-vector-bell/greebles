@@ -59,7 +59,7 @@ describe('the wilds', () => {
 
   it('a Beacon brings Greebles in fast', () => {
     const w = fresh();
-    w.s.spawns = []; w.s.items.beacon = 1;
+    w.s.spawns = []; w.s.items.beacon = 1; w.s.beaconCharges = 0;
     expect(w.useBeacon(T0).ok).toBe(true);
     w.updateWilds(T0 + 10 * MIN);
     expect(w.s.spawns.filter(x => x.src === 'beacon').length).toBeGreaterThanOrEqual(3);
@@ -202,9 +202,9 @@ describe('evolving', () => {
     // a catch gives 5 (7 for a 4★ or better); the whole family shares it
     const x = w.addSpawn(T0, 'wild', 'ashpup'); x.stars = 4; w.startEncounter(x.id); w.s.items.star = 1; w.throwSnare('star', 0);
     expect(w.candyOf('ashpup')).toBe(7); expect(w.candyOf('gleckor')).toBe(7);
-    // sending one home gives 2
+    // sending one home gives 4
     const extra = w.s.bag[w.s.bag.length - 1].u;
-    expect(w.sell(extra).ok).toBe(true); expect(w.candyOf('ashpup')).toBe(9);
+    expect(w.sell(extra).ok).toBe(true); expect(w.candyOf('ashpup')).toBe(11);
     w.s.candy.ashpup = 25;
     expect(w.evolve(u, 'gleck', T0).ok).toBe(true); expect(w.candyOf('gleck')).toBe(0);
     // stage 2 → 3 costs more
@@ -229,9 +229,9 @@ describe('evolving', () => {
     expect(w.levelCap).toBe(20); expect(g.lv).toBeGreaterThan(12);
     // wild Greebles are always well under the cap
     for (let i = 0; i < 100; i++) expect(w.addSpawn(T0, 'wild').lv).toBeLessThanOrEqual(20 - 8);
-    // camp gives no xp any more
+    // camp xp is slow: an hour is not a level
     const c = give(w, 'ashpup', 3); w.assign(c); w.advance(HOUR, T0);
-    expect(w.get(c)!.lv).toBe(3); expect(w.get(c)!.xp).toBe(0);
+    expect(w.get(c)!.lv).toBe(3); expect(w.get(c)!.xp).toBeGreaterThan(0);
   });
 });
 
@@ -271,7 +271,7 @@ describe('camp, shop and robots', () => {
   it('the win check matches a real fight', () => {
     const w = fresh();
     for (const lv of [1, 3, 6, 10, 20]) for (const r of ['drone', 'pylon', 'colossus']) {
-      w.s.team = [null, null, null]; w.s.autoPatrol = false;
+      w.s.team = [null, null, null]; w.s.autoPatrol = false; w.s.rations = 5;
       const u = fighter(w, 'velm', lv); const guess = w.wouldWin(u, r);
       w.startFight(u, r); w.advance(120_000, T0);
       expect(w.s.stats.wins > 0).toBe(guess); w.s.stats.wins = 0; w.s.stats.losses = 0;
@@ -283,7 +283,7 @@ describe('saves', () => {
   it('0.13: saves from before the new rules start over (with a one-time notice)', () => {
     const old = { version: 8, scrap: 99999, bag: [{ u: 'g1', sp: 'draug', lv: 30, xp: 5, stars: 5 }], camp: ['g1'], stats: { caught: 40 }, lastSeen: T0 };
     const s = migrate(old, T0);
-    expect(s.version).toBe(9); expect(s.bag).toEqual([]); expect(s.scrap).toBe(RULES.startScrap);
+    expect(s.version).toBe(10); expect(s.bag).toEqual([]); expect(s.scrap).toBe(RULES.startScrap);
     expect(s.newRules).toBe(true); expect(s.intro).toBe(0); expect(s.caught).toEqual({});
     expect(s.spawns.length).toBeGreaterThan(0);
     // an empty old save (never played) just starts fresh with no notice
@@ -558,10 +558,11 @@ describe('0.6: ship, signal home, perks, expeditions, swarm', () => {
     expect(w.sendExpedition(u, day + DAY_MS).ok).toBe(true);         // next day
   });
 
-  it('the weekly swarm kind is much more common', () => {
+  it('the weekly swarm is not added to areas that do not already have that kind', () => {
     const w = fresh(3); const sw = w.swarmKind(T0).id;
-    let n = 0; for (let i = 0; i < 3000; i++) if (w.rollKind(T0).id === sw) n++;
-    expect(n / 3000).toBeGreaterThan(0.15);
+    if (REGIONS[0].kinds.includes(sw)) return;
+    let n = 0; for (let i = 0; i < 500; i++) if (w.rollKind(T0).id === sw) n++;
+    expect(n).toBe(0);
   });
 });
 
@@ -617,7 +618,7 @@ describe('0.8: Mythic Hunts + Void Rift', () => {
     expect(w.tallyOf('patrol')).toBe(12); expect(w.s.hunts['h_tide']).toBe(T0);
     const old: any = JSON.parse(JSON.stringify(w.s)); delete old.tally; delete old.hunts; old.version = 9;
     const m = migrate(old, T0);
-    expect(m.tally).toEqual({}); expect(m.hunts).toEqual({}); expect(m.version).toBe(9);
+    expect(m.tally).toEqual({}); expect(m.hunts).toEqual({}); expect(m.version).toBe(10);
   });
 });
 
@@ -729,29 +730,24 @@ describe('0.13: team, energy, auto-patrol', () => {
     const b = give(w, 'velm', 8, 3); w.assign(b);
     expect(w.swapIn(b, a).ok).toBe(true); expect(w.inTeam(b)).toBe(true); expect(w.inCamp(a)).toBe(true);
   });
-  it('fights cost energy; a knocked-out Greeble has none left; energy comes back fastest in camp', () => {
+  it('fights spend rations; a team with none cannot fight', () => {
     const w = fresh(); w.s.autoPatrol = false;
     const a = fighter(w, 'draug', 10, 3);
-    w.startFight(a, 'drone'); expect(w.energy(w.get(a)!)).toBe(9);
-    w.advance(60_000, T0);
-    // boss costs 3 each, and a weak one gets knocked out
-    const weak = fighter(w, 'ashpup', 1, 1);
-    w.startFight([a, weak], 'boss', 'boss'); w.advance(600_000, T0);
-    expect(w.get(weak)!.en).toBeLessThan(1);
-    // energy refills: 1 per 40 min on the team, 1 per 10 min in camp
-    const t = w.get(a)!; t.en = 0; w.advance(40 * MIN, T0); expect(w.energy(t)).toBe(1);
-    w.assign(a); t.en = 0; w.advance(40 * MIN, T0); expect(w.energy(t)).toBe(4);
-    // not enough energy = can't fight
-    w.toTeam(a); t.en = 0;
+    const before = w.get(a)!.en;
+    w.s.rations = 1;
+    expect(w.startFight(a, 'drone').ok).toBe(true);
+    expect(w.s.rations).toBe(0);
+    expect(w.get(a)!.en).toBe(before);
     expect(w.startFight(a, 'drone').ok).toBe(false);
   });
-  it('auto-patrol fights on its own (also offline) and keeps 3 energy back for bosses', () => {
+  it('auto-patrol fights on its own while a Trawler makes rations, and keeps 3 back', () => {
     const w = fresh();
-    const a = fighter(w, 'draug', 10, 3), b = fighter(w, 'velm', 10, 3);
+    fighter(w, 'draug', 10, 3); fighter(w, 'velm', 10, 3);
+    w.assign(give(w, 'tidling', 1, 1));
+    w.s.rations = 12;
     const r = w.catchUp(8 * HOUR, T0 + 8 * HOUR);
     expect(r.wins).toBeGreaterThan(10);
-    for (const u of [a, b]) expect(w.energy(w.get(u)!)).toBeGreaterThanOrEqual(3);
-    expect(w.get(a)!.lv).toBeGreaterThan(10);
+    expect(w.s.rations).toBeGreaterThanOrEqual(3);
     // off = no fights
     const w2 = fresh(); fighter(w2, 'draug', 10, 3); w2.setAutoPatrol(false);
     expect(w2.catchUp(8 * HOUR, T0 + 8 * HOUR).wins).toBe(0);

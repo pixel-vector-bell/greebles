@@ -269,7 +269,20 @@ export const ENERGY_COST = { patrol: 1, wreck: 2, boss: 3 } as const;
 /** Auto-patrol stops when a Greeble is down to this much energy, so the team can always take on a boss. */
 export const AUTO_RESERVE = 3;
 /** Candy (one kind per family): how much you get. */
-export const CANDY = { catch: 5, goodStars: 2, prismMult: 2, hatch: 8, home: 2, expo: 5 } as const;
+export const CANDY = { catch: 5, goodStars: 2, prismMult: 2, hatch: 8, home: 4, expo: 5 } as const;
+/** Shared fight fuel. Trawlers make it in camp. The whole team spends it. */
+export const RATION_CAP = 12;
+export const RATION_RESERVE = 3;
+export const RATION_START = 6;
+export const RATION_COST = { patrol: 1, wreck: 2, boss: 3 } as const;
+/** How long one Trawl camper takes to make 1 ration, by stage. */
+export const RATION_MS: Record<1 | 2 | 3, number> = { 1: 26 * MIN, 2: 20 * MIN, 3: 16 * MIN };
+/** Dig campers restock beacon charges (the stay-and-play button). */
+export const BEACON_CHARGE_CAP = 3;
+export const BEACON_CHARGE_START = 1;
+export const BEACON_CHARGE_MS: Record<1 | 2 | 3, number> = { 1: 3 * HOUR, 2: 2 * HOUR, 3: 80 * MIN };
+/** Campers gain 1 xp every this many camp ticks (a tick is 15 s). */
+export const CAMP_XP_EVERY = 10;
 /** Candy to evolve out of this stage (rare and epic families cost more). */
 export function evoCandy(m: Morph): number {
   const pricey = m.rarity === 'rare' || m.rarity === 'epic' || m.rarity === 'legendary';
@@ -315,7 +328,7 @@ export interface Region {
   boss: Boss;
 }
 export const REGIONS: Region[] = [
-  { id: 'ash', name: 'Ash Flats', icon: '🏜️', blurb: 'Where you crashed. Dusty, warm, and full of young Greebles.', lvl: 0, mult: 0.6, xpMult: 1, favor: 'mine',
+  { id: 'ash', name: 'Ash Flats', icon: '🏜️', blurb: 'Dusty, warm, and full of young Greebles.', lvl: 0, mult: 0.6, xpMult: 1, favor: 'mine',
     kinds: ['ashpup', 'vorr', 'scrappling', 'velm', 'skarnox', 'tidling', 'umberith', 'zoln', 'phaest'], legendary: 'quorvex',
     boss: { name: 'Rust Warden', hp: 1100, atk: 4, xp: 150, scrap: 300, el: 'rust' } },
   { id: 'tide', name: 'Tide Pools', icon: '🌊', blurb: 'Warm shallow water. Trawl Greebles love it here.', lvl: 5, mult: 2.2, xpMult: 0.7, favor: 'fish',

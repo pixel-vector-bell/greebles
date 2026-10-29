@@ -4,14 +4,15 @@ import {
   craterAt, hash32, hasMorph, isNight, morph, robot, stormAt, xpNeed,
   REGIONS, BOSS_REMATCH_MS, TEAM_MAX, UPGRADES, PRESS_MS_PER_SNARE, region, regionIndex, robotIn,
   JOB, FAVOR_MULT, LURES, LURE_MS, LURE_SPAWN_MIN, LURE_SPAWN_MAX, type LureId,
-  HUNTS, HUNT_SPAWN_MS, type Hunt, NEST_MS, EGG_MAX, HATCH_MS, EGG_PRISM_MULT, TASK_POOL, DAILY_COUNT, ELEMENTS, familyRoot, SHIP_PARTS, PERKS, perkCost, SIGNAL_STEP, EXPEDITION_MS, DAY_MS, WEEK_MS, SWARM_MULT, type PartId, type PerkId,
+  HUNTS, HUNT_SPAWN_MS, type Hunt, NEST_MS, EGG_MAX, HATCH_MS, EGG_PRISM_MULT, TASK_POOL, DAILY_COUNT, ELEMENTS, familyRoot, SHIP_PARTS, PERKS, perkCost, SIGNAL_STEP, EXPEDITION_MS, DAY_MS, WEEK_MS, type PartId, type PerkId,
   RECIPES, MOVE_AUTO, MOVE_AUTO_MULT, MOVE_CHARGE, MOVE_TAP_MULT, elementOf, typeMult, type Element,
-  LEVEL_CAPS, XP_BANK_LEVELS, AUTO_RESERVE, WILD_UNDER_CAP, ENERGY_COST, CANDY, evoCandy, CAMP_SCRAP_MULT, PATROL_SCRAP_MULT,
+  LEVEL_CAPS, XP_BANK_LEVELS, WILD_UNDER_CAP, CANDY, evoCandy, CAMP_SCRAP_MULT, PATROL_SCRAP_MULT,
+  RATION_CAP, RATION_RESERVE, RATION_START, RATION_COST, RATION_MS, BEACON_CHARGE_CAP, BEACON_CHARGE_START, BEACON_CHARGE_MS, CAMP_XP_EVERY,
   type Evo, type ItemId, type Morph, type Rarity, type RegionId, type Role, type SnareId, type UpgradeId,
 } from './content';
 import { nextRandom } from './rng';
 
-export const SAVE_VERSION = 9;
+export const SAVE_VERSION = 10;
 
 /** `en` = energy (0 to RULES.maxEnergy, can be fractional while it refills). */
 export interface Greeble { u: string; sp: string; lv: number; xp: number; stars: number; prism: boolean; en: number; caughtAt?: number }
@@ -44,6 +45,13 @@ export interface GameState {
   /** 0.13: the team fights patrols on its own while it has energy (also while you're away). */
   autoPatrol: boolean;
   patrolCarry: number;
+  /** 0.14: shared rations. Trawlers make them. Fights spend them. */
+  rations: number;
+  rationFrac: number;
+  /** 0.14: beacon charges Diggers make. Separate from bought beacon items. */
+  beaconCharges: number;
+  beaconFrac: number;
+  campXpTick: number;
   /** 0.13: candy per family (keyed by the family's first stage). Spent to evolve. */
   candy: Record<string, number>;
   /** 0.13: this save was reset for the new rules (show the notice once). */
@@ -113,6 +121,7 @@ export function newGame(seed = (Math.random() * 2 ** 31) | 0, now = Date.now()):
     version: SAVE_VERSION, rng: seed, nextId: 1, scrap: RULES.startScrap,
     bag: [], bagMax: RULES.bagMax, camp: Array(RULES.campSlots).fill(null), campCarry: 0, fight: null,
     team: Array(RULES.teamSlots).fill(null), autoPatrol: true, patrolCarry: 0, candy: {},
+    rations: RATION_START, rationFrac: 0, beaconCharges: BEACON_CHARGE_START, beaconFrac: 0, campXpTick: 0,
     items: { ...START_ITEMS },
     spawns: [], wildClock: now, nextAmbientAt: now + RULES.ambientMinMs, nextCraterAt: 0, nextBeaconAt: 0, beaconUntil: 0,
     wreck: null, nextWreckAt: now + RULES.wreckFirstMs, enc: null,
@@ -314,8 +323,8 @@ export class World {
   inTeam(u: string) { return this.s.team.includes(u); }
   /** Team members, in slot order. */
   get teamList(): Greeble[] { return this.s.team.map(u => (u ? this.get(u) : undefined)).filter(Boolean) as Greeble[]; }
-  /** Team members with at least `cost` energy (and not out on an expedition). */
-  readyTeam(cost = 1): Greeble[] { return this.teamList.filter(g => this.energy(g) >= cost && this.s.expo?.u !== g.u); }
+  /** Team members not out on an expedition. Fights spend rations, not a personal energy bar. */
+  readyTeam(_cost = 1): Greeble[] { return this.teamList.filter(g => this.s.expo?.u !== g.u); }
   energy(g: Greeble) { return Math.floor(g.en + 1e-9); }
   /** ms for one energy to come back for this Greeble right now. */
   enMs(g: Greeble) { return (this.inCamp(g.u) ? RULES.enCampMs : RULES.enRestMs) / (1 + this.up('bedroll') * 0.25); }
@@ -345,7 +354,7 @@ export class World {
   bossReadyAt(id: RegionId) { const b = this.s.bossBeaten[id]; return b ? b + BOSS_REMATCH_MS : 0; }
   count(item: ItemId) { return this.s.items[item] ?? 0; }
   private give(item: ItemId, n: number) { this.s.items[item] = this.count(item) + n; }
-  quality(g: { stars: number; prism: boolean }) { return (1 + (g.stars - 1) * 0.1) * (g.prism ? 1.2 : 1); }
+  quality(g: { stars: number; prism: boolean }) { return (1 + (g.stars - 1) * 0.04) * (g.prism ? 1.2 : 1); }
   power(g: Greeble) { const m = morph(g.sp); return Math.round((BASE_POWER[m.rarity] + (m.stage - 1) * 2 + g.lv + (m.role === 'fight' ? 2 : 0)) * this.quality(g)); }
   fighterHp(g: Greeble) { return 10 + this.power(g) * 2; }
   yieldOf(g: Greeble) { const m = morph(g.sp); return Math.round((1 + Math.floor(g.lv / 10) + (m.stage - 1) + (m.role === 'fight' ? 1 : 0)) * this.quality(g) * (1 + this.up('bench') * 0.1) * (m.role === this.reg.favor ? 1.25 : 1) * (1 + this.perk('thrift') * 0.2) * CAMP_SCRAP_MULT * 10) / 10; }
@@ -395,13 +404,10 @@ export class World {
     if (this.s.bossBeaten[reg.id]) pool.push(morph(reg.legendary));
     const perTier = new Map<Rarity, number>();
     for (const m of pool) perTier.set(m.rarity, (perTier.get(m.rarity) ?? 0) + 1);
-    const swarm = this.swarmKind(t).id;
-    if (!pool.some(m => m.id === swarm)) pool.push(morph(swarm));   // the swarm kind shows up in every area
     const weights = pool.map(m => {
       let w = TIER_WEIGHT[m.rarity] / perTier.get(m.rarity)!;
       if (opts.rareBoost && RARITIES.indexOf(m.rarity) >= 2) w *= opts.rareBoost;
       if (opts.role && m.role === opts.role) w *= opts.roleMult ?? 4;
-      if (m.id === swarm) w *= SWARM_MULT;
       if (night && m.tags?.includes('night')) w *= 3;
       if (storm && m.tags?.includes('storm')) w *= 3;
       return w;
@@ -505,8 +511,9 @@ export class World {
   }
 
   useBeacon(now: number): ActionResult {
-    if (this.count('beacon') < 1) return fail('You have no Beacons. The shop sells them.');
-    this.s.items.beacon = this.count('beacon') - 1;
+    if (this.s.beaconCharges > 0) this.s.beaconCharges--;
+    else if (this.count('beacon') >= 1) this.s.items.beacon = this.count('beacon') - 1;
+    else return fail('No beacon charges. A Digger in camp makes them, or buy one at the shop.');
     this.s.beaconUntil = Math.max(now, this.s.beaconUntil) + RULES.beaconLenMs;
     this.s.nextBeaconAt = now;
     this.emit({ t: 'beacon' });
@@ -812,13 +819,12 @@ export class World {
   /** One hit from the robot on this Greeble. */
   hitBy(g: Greeble, atk: number, el: Element) { return Math.max(1, Math.round(atk * typeMult(el, elementOf(g.sp))) - Math.floor(g.lv / 5)); }
   /** Only team members fight, and each needs enough energy for this kind of fight. */
-  private teamOf(us: string[], kind: FightKind = 'patrol', checkEnergy = true): Greeble[] | string {
+  private teamOf(us: string[], _kind: FightKind = 'patrol', _checkEnergy = true): Greeble[] | string {
     const ids = [...new Set(us)].slice(0, TEAM_MAX);
     const team = ids.map(u => this.get(u)).filter(Boolean) as Greeble[];
     if (!team.length) return 'Put Greebles on your team first (Fight → Team).';
     if (team.some(g => !this.inTeam(g.u))) return 'Only Greebles on your team can fight.';
     if (team.some(g => this.s.expo?.u === g.u)) return 'One of them is out on an expedition.';
-    if (checkEnergy && team.some(g => this.energy(g) < ENERGY_COST[kind])) return `Each fighter needs ⚡${ENERGY_COST[kind]} energy. Let tired ones rest in camp.`;
     return team;
   }
   /** Simulate a fight on copies (moves fire on their own): would this team win? */
@@ -863,12 +869,14 @@ export class World {
     if (k === 'boss' && Date.now() < this.bossReadyAt(this.s.region)) return fail('The boss is still being rebuilt. Come back later.');
     const foe = this.foe(robotId, k);
     if (!foe) return fail('No such robot.');
+    const cost = RATION_COST[k];
+    if (this.s.rations < cost) return fail(`Needs ${cost} ration${cost === 1 ? '' : 's'}. Trawlers make them in camp.`);
+    this.s.rations -= cost;
     this.s.fight = {
       team: team.map(g => { const hp = this.fighterHp(g); return { u: g.u, hp, maxHp: hp, charge: 0, boost: false }; }), u: team[0].u,
       robot: k === 'boss' ? 'boss' : robotId, robotHp: foe.hp, robotMax: foe.hp, carry: 0, kind: k, reg: this.s.region,
       ...(auto ? { auto: true } : {}),
     };
-    for (const g of team) g.en = Math.max(0, g.en - ENERGY_COST[k]);
     this.s.patrolCarry = 0;
     return OK;
   }
@@ -904,7 +912,7 @@ export class World {
       this.s.stats.wins++;
       // 0.13: everyone who fought gets the full xp (energy is what limits fighting now)
       const share = Math.round(foe.xp * (f.kind === 'wreck' ? 1.5 : f.kind === 'boss' && this.s.bossBeaten[f.reg] ? 0.5 : 1));
-      for (const x of f.team) { const g = this.get(x.u); if (g) { if (x.hp <= 0) g.en = 0; this.addXp(g, share); } }
+      for (const x of f.team) { const g = this.get(x.u); if (g) this.addXp(g, share); }
       const loot: Partial<Record<ItemId, number>> = {};
       const add = (k: ItemId, n: number) => { loot[k] = (loot[k] ?? 0) + n; };
       const ri = regionIndex(f.reg);
@@ -949,7 +957,6 @@ export class World {
     const targets = foe.all ? alive : [alive[Math.floor(this.rand() * alive.length)]];
     for (const tgt of targets) {
       tgt.hp -= this.hitBy(this.get(tgt.u)!, foe.atk, foe.el);
-      if (tgt.hp <= 0) { const g = this.get(tgt.u); if (g) g.en = 0; }   // knocked out: no energy left
     }
     if (f.team.every(x => x.hp <= 0)) {
       this.s.stats.losses++;
@@ -1018,8 +1025,8 @@ export class World {
   }
   /** Pick what Auto-patrol fights next: the toughest patrol robot the ready team should beat. */
   autoPick(): { team: string[]; robot: string } | null {
-    // it keeps enough energy back that the team is always ready for a boss
-    const team = this.readyTeam(ENERGY_COST.patrol + AUTO_RESERVE).map(g => g.u);
+    if (this.s.rations <= RATION_RESERVE) return null;
+    const team = this.readyTeam().map(g => g.u);
     if (!team.length) return null;
     for (let i = ROBOTS.length - 1; i >= 0; i--) if (this.winOdds(team, ROBOTS[i].id, 'patrol') >= 0.7) return { team, robot: ROBOTS[i].id };
     return null;
@@ -1031,11 +1038,31 @@ export class World {
     let left = ms;
     while (left > 0) { const d = Math.min(left, RULES.campTickMs); this.step(d, now); left -= d; }
   }
+  /** Trawlers make rations. Diggers make beacon charges. Both keep going while you are away. */
+  private makeCampGoods(ms: number) {
+    const rationUnit = RATION_MS[1];
+    const beaconUnit = BEACON_CHARGE_MS[1];
+    for (const u of this.s.camp) {
+      const g = u ? this.get(u) : undefined; if (!g) continue;
+      const stage = morph(g.sp).stage;
+      const m = morph(g.sp);
+      if (m.role === 'fish') this.s.rationFrac += ms * rationUnit / RATION_MS[stage];
+      if (m.role === 'mine') this.s.beaconFrac += ms * beaconUnit / BEACON_CHARGE_MS[stage];
+    }
+    while (this.s.rationFrac >= rationUnit && this.s.rations < RATION_CAP) { this.s.rationFrac -= rationUnit; this.s.rations++; }
+    while (this.s.beaconFrac >= beaconUnit && this.s.beaconCharges < BEACON_CHARGE_CAP) { this.s.beaconFrac -= beaconUnit; this.s.beaconCharges++; }
+    if (this.s.rations >= RATION_CAP) this.s.rationFrac = Math.min(this.s.rationFrac, rationUnit - 1);
+    if (this.s.beaconCharges >= BEACON_CHARGE_CAP) this.s.beaconFrac = Math.min(this.s.beaconFrac, beaconUnit - 1);
+  }
   private step(ms: number, now: number) {
     this.s.campCarry += ms;
-    while (this.s.campCarry >= RULES.campTickMs) { this.s.campCarry -= RULES.campTickMs; this.campPayout(); }
-    // energy comes back (fastest while resting in camp)
-    for (const g of this.s.bag) if (g.en < RULES.maxEnergy) g.en = Math.min(RULES.maxEnergy, g.en + ms / this.enMs(g));
+    while (this.s.campCarry >= RULES.campTickMs) {
+      this.s.campCarry -= RULES.campTickMs;
+      this.campPayout();
+      this.s.campXpTick++;
+      if (this.s.campXpTick % CAMP_XP_EVERY === 0) for (const u of this.s.camp) { const g = u ? this.get(u) : undefined; if (g) this.addXp(g, 1); }
+    }
+    this.makeCampGoods(ms);
     this.warmEggs(ms);
     if (!this.nestWhy()) {
       // eggs laid part-way through this step have been warming since they were laid (matters for long offline catch-ups)
@@ -1171,6 +1198,11 @@ export function migrate(raw: any, now = Date.now()): GameState {
     bestEver: { caught: Math.max(0, num(raw.bestEver?.caught, 0)), bosses: Math.max(0, num(raw.bestEver?.bosses, 0)) },
     nest: (() => { const n = Array.isArray(raw.nest) ? raw.nest : []; const free = (u: any) => typeof u === 'string' && ids.has(u) && !camp.includes(u) && !team.includes(u); const a = free(n[0]) ? n[0] : null; const b = free(n[1]) && n[1] !== a ? n[1] : null; return [a, b] as [string | null, string | null]; })(),
     team, autoPatrol: raw.autoPatrol !== false, patrolCarry: Math.max(0, num(raw.patrolCarry, 0)),
+    rations: num(raw.version, 0) >= 10 ? Math.min(RATION_CAP, Math.max(0, num(raw.rations, RATION_START))) : 8,
+    rationFrac: Math.max(0, num(raw.rationFrac, 0)),
+    beaconCharges: num(raw.version, 0) >= 10 ? Math.min(BEACON_CHARGE_CAP, Math.max(0, num(raw.beaconCharges, 0) | 0)) : BEACON_CHARGE_START,
+    beaconFrac: Math.max(0, num(raw.beaconFrac, 0)),
+    campXpTick: Math.max(0, num(raw.campXpTick, 0) | 0),
     candy: Object.fromEntries(Object.entries(raw.candy ?? {}).filter(([k, v]) => hasMorph(k) && typeof v === 'number' && isFinite(v) && v >= 0).map(([k, v]) => [k, Math.floor(v as number)])) as Record<string, number>,
     ...(raw.newRules === true ? { newRules: true } : {}),
     nestCarry: Math.max(0, num(raw.nestCarry, 0)),
